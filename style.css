@@ -1,0 +1,53 @@
+/* 投稿履歴のスタイル */
+.stMarkdown div[data-testid="stMarkdownContainer"] p {
+	margin: 0.3em 0; /* 縦の間隔を狭める */
+}
+
+.previous-post {
+	color: #888888; /* 前回の投稿を薄く表示 */
+}
+
+h1 {
+	font-size: 1.28em !important; /* 80% of default 1.6em */
+}
+h2 {
+	font-size: 1.04em !important; /* 80% of default 1.3em */
+}
+h3 {
+	font-size: 0.88em !important; /* 80% of default 1.1em */
+}
+
+/* プルダウンメニューのスタイル */
+.stSelectbox > div > div[data-baseweb="select"] > div {
+	background-color: white !important;
+	border: 1px solid #d1d5db !important;
+	border-radius: 6px !important;
+}
+
+.stMultiSelect > div > div[data-baseweb="select"] > div {
+	background-color: white !important;
+	border: 1px solid #d1d5db !important;
+	border-radius: 6px !important;
+}
+
+/* プルダウンの選択肢部分 */
+div[data-baseweb="popover"] {
+	border: 1px solid #d1d5db !important;
+	border-radius: 6px !important;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+div[data-baseweb="popover"] ul {
+	background-color: white !important;
+	border-radius: 6px !important;
+}
+
+div[data-baseweb="popover"] li {
+	background-color: white !important;
+	color: #222 !important;
+}
+
+div[data-baseweb="popover"] li:hover {
+	background-color: #f3f4f6 !important;
+	color: #222 !important;
+}
