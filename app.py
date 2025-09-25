@@ -74,8 +74,9 @@ def init_db():
     tuning_history_table_query = "CREATE TABLE IF NOT EXISTS tuning_history (id INTEGER PRIMARY KEY, post_id INTEGER, timestamp TEXT, previous_content TEXT, advice_used TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
     custom_fields_table_query = "CREATE TABLE IF NOT EXISTS custom_fields (id INTEGER PRIMARY KEY, field_name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, field_type TEXT DEFAULT 'text', placeholder TEXT DEFAULT '', is_required INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0)"
     send_history_table_query = "CREATE TABLE IF NOT EXISTS send_history (id INTEGER PRIMARY KEY, post_id INTEGER, destination TEXT, sent_at TEXT, scheduled_datetime TEXT, status TEXT DEFAULT 'pending', error_message TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
+    app_settings_table_query = "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, description TEXT DEFAULT '', category TEXT DEFAULT 'general')"
 
-    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query]
+    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query, app_settings_table_query]
     for query in queries: execute_query(query)
     
     if execute_query("SELECT COUNT(*) as c FROM situation_categories", fetch="one")['c'] == 0:
@@ -98,6 +99,19 @@ def init_db():
     if execute_query("SELECT COUNT(*) as c FROM advice_master", fetch="one")['c'] == 0:
         default_advice = [("もっと可愛く",), ("もっと大人っぽく",), ("意外な一面を見せて",), ("豆知識を加えて",), ("句読点を工夫して",), ("少しユーモアを",)]
         for adv in default_advice: execute_query("INSERT INTO advice_master (content) VALUES (?)", adv)
+    
+    # アプリ設定のデフォルト値を初期化
+    if execute_query("SELECT COUNT(*) as c FROM app_settings", fetch="one")['c'] == 0:
+        default_settings = [
+            ("default_char_limit", "140", "デフォルト文字数制限", "投稿生成"),
+            ("default_post_count", "5", "デフォルト生成数", "投稿生成"),
+            ("situation_placeholder", "例：お気に入りの喫茶店で読書中", "シチュエーション入力プレースホルダ", "UI設定"),
+            ("campaign_placeholder", "例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。", "一斉指示プレースホルダ", "UI設定"),
+            ("name_pairs_placeholder", "例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜", "名前ペア入力プレースホルダ", "UI設定"),
+            ("ai_generation_instruction", "魅力的で個性豊かなキャラクター", "AI生成時のデフォルト指示", "AI設定"),
+        ]
+        for setting in default_settings:
+            execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", setting)
     
     # 既存のpostsテーブルに新しいカラムを追加（マイグレーション）
     # カラムの存在確認と追加
@@ -343,6 +357,19 @@ def clear_editing_post():
     if 'editing_post_id' in st.session_state:
         st.session_state.editing_post_id = None
 
+def get_app_setting(key, default_value=""):
+    """アプリ設定を取得"""
+    result = execute_query("SELECT value FROM app_settings WHERE key = ?", (key,), fetch="one")
+    return result['value'] if result else default_value
+
+def update_app_setting(key, value, description="", category="general"):
+    """アプリ設定を更新（存在しない場合は作成）"""
+    existing = execute_query("SELECT key FROM app_settings WHERE key = ?", (key,), fetch="one")
+    if existing:
+        execute_query("UPDATE app_settings SET value = ? WHERE key = ?", (value, key))
+    else:
+        execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", (key, value, description, category))
+
 def main():
     st.set_page_config(layout="wide")
     load_css("style.css")
@@ -541,8 +568,10 @@ def main():
                 query = f"SELECT s.content, s.time_slot FROM situations s JOIN situation_categories sc ON s.category_id = sc.id WHERE sc.name IN ({placeholders})"
                 situations_rows = execute_query(query, valid_allowed_categories, fetch="all")
                 col1, col2 = st.columns(2)
-                num_posts = col1.number_input("生成する数", min_value=1, max_value=50, value=5, key="post_num")
-                char_limit = col2.number_input("文字数（以内）", min_value=20, max_value=300, value=140, key="char_limit")
+                default_post_count = int(get_app_setting("default_post_count", "5"))
+                num_posts = col1.number_input("生成する数", min_value=1, max_value=50, value=default_post_count, key="post_num")
+                default_char_limit = int(get_app_setting("default_char_limit", "140"))
+                char_limit = col2.number_input("文字数（以内）", min_value=20, max_value=300, value=default_char_limit, key="char_limit")
 
                 if st.button("生成開始", type="primary"):
                     if st.session_state.get('gemini_model'):
@@ -750,8 +779,10 @@ def main():
         st.markdown("---")
         with st.form(key="campaign_form"):
             st.subheader("指示内容")
-            campaign_instruction = st.text_area("具体的な指示内容*", placeholder="例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。")
-            char_limit = st.number_input("文字数（以内）", min_value=20, max_value=300, value=140)
+            campaign_placeholder = get_app_setting("campaign_placeholder", "例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。")
+            campaign_instruction = st.text_area("具体的な指示内容*", placeholder=campaign_placeholder)
+            default_char_limit = int(get_app_setting("default_char_limit", "140"))
+            char_limit = st.number_input("文字数（以内）", min_value=20, max_value=300, value=default_char_limit)
             if st.form_submit_button("選択したキャスト全員に投稿を生成させる", type="primary"):
                 if not selected_cast_names:
                     st.error("対象キャストを1名以上選択してください。")
@@ -1234,9 +1265,10 @@ def main():
                 
                 with col2:
                     st.subheader("🔧 事前登録項目")
+                    name_pairs_placeholder = get_app_setting("name_pairs_placeholder", "例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜")
                     gen_names = st.text_area(
                         "ユーザー名,名前 のペアリスト（必須）\n※1行に1ペアずつ入力",
-                        placeholder="例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜",
+                        placeholder=name_pairs_placeholder,
                         height=100
                     )
                     gen_gender_ratio = st.selectbox(
@@ -1318,7 +1350,8 @@ def main():
                                 gender = random.choices(["女性", "男性"], weights=[weights["女性"], weights["男性"]])[0]
                                 
                                 # AIプロンプトを作成
-                                base_instruction = gen_instruction if gen_instruction.strip() else "魅力的で個性豊かなキャラクター"
+                                default_instruction = get_app_setting("ai_generation_instruction", "魅力的で個性豊かなキャラクター")
+                                base_instruction = gen_instruction if gen_instruction.strip() else default_instruction
                                 
                                 prompt = f"""以下の指示に従って、キャラクターのプロフィールを生成してください。
 
@@ -1642,7 +1675,8 @@ def main():
         st.markdown("---")
         st.header("個別管理")
         with st.form(key="new_situation_form", clear_on_submit=True):
-            new_content = st.text_area("シチュエーション内容", placeholder="例：お気に入りの喫茶店で読書中")
+            situation_placeholder = get_app_setting("situation_placeholder", "例：お気に入りの喫茶店で読書中")
+            new_content = st.text_area("シチュエーション内容", placeholder=situation_placeholder)
             c1, c2 = st.columns(2)
             time_slot = c1.selectbox("時間帯", ["いつでも", "朝", "昼", "夜"])
             cat_rows = execute_query("SELECT id, name FROM situation_categories ORDER BY name", fetch="all")
@@ -1871,8 +1905,100 @@ def main():
                         else:
                             st.warning("JSON内容を入力してください。")
         
-        st.subheader("🔧 その他の設定")
-        st.markdown("今後、その他のシステム設定項目がここに追加される予定です。")
+        st.subheader("🔧 アプリケーション設定")
+        
+        # 設定をカテゴリ別に取得
+        all_settings = execute_query("SELECT * FROM app_settings ORDER BY category, key", fetch="all")
+        if all_settings:
+            settings_by_category = {}
+            for setting in all_settings:
+                category = setting['category']
+                if category not in settings_by_category:
+                    settings_by_category[category] = []
+                settings_by_category[category].append(setting)
+            
+            # カテゴリごとにタブを作成
+            tab_names = list(settings_by_category.keys())
+            tabs = st.tabs([f"📊 {cat}" for cat in tab_names])
+            
+            for i, (category, settings) in enumerate(settings_by_category.items()):
+                with tabs[i]:
+                    st.markdown(f"### {category}設定")
+                    
+                    with st.form(f"settings_form_{category}"):
+                        updated_values = {}
+                        
+                        for setting in settings:
+                            key = setting['key']
+                            current_value = setting['value']
+                            description = setting['description']
+                            
+                            if key.endswith('_placeholder'):
+                                # プレースホルダー設定は大きなテキストエリア
+                                updated_values[key] = st.text_area(
+                                    f"📝 {description}",
+                                    value=current_value,
+                                    height=100,
+                                    key=f"setting_{key}"
+                                )
+                            elif key.endswith('_limit') or key.endswith('_count'):
+                                # 数値設定
+                                try:
+                                    current_int = int(current_value)
+                                    updated_values[key] = str(st.number_input(
+                                        f"🔢 {description}",
+                                        min_value=1,
+                                        max_value=500,
+                                        value=current_int,
+                                        key=f"setting_{key}"
+                                    ))
+                                except ValueError:
+                                    updated_values[key] = st.text_input(
+                                        f"📝 {description}",
+                                        value=current_value,
+                                        key=f"setting_{key}"
+                                    )
+                            else:
+                                # その他は通常のテキスト入力
+                                updated_values[key] = st.text_input(
+                                    f"📝 {description}",
+                                    value=current_value,
+                                    key=f"setting_{key}"
+                                )
+                        
+                        if st.form_submit_button(f"💾 {category}設定を保存", type="primary"):
+                            try:
+                                for key, value in updated_values.items():
+                                    update_app_setting(key, value)
+                                st.success(f"✅ {category}設定を保存しました！")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 設定の保存中にエラーが発生しました: {e}")
+                
+        else:
+            st.info("設定項目がありません。初期化中...")
+            st.rerun()
+        
+        st.markdown("---")
+        st.subheader("⚙️ 設定の追加")
+        with st.expander("新しい設定項目を追加", expanded=False):
+            with st.form("add_setting_form"):
+                col1, col2 = st.columns(2)
+                new_key = col1.text_input("設定キー", placeholder="例：default_timeout")
+                new_category = col2.selectbox("カテゴリ", ["投稿生成", "UI設定", "AI設定", "その他"])
+                new_description = st.text_input("説明", placeholder="例：タイムアウト時間（秒）")
+                new_value = st.text_input("初期値", placeholder="例：30")
+                
+                if st.form_submit_button("➕ 設定を追加"):
+                    if new_key and new_value and new_description:
+                        try:
+                            update_app_setting(new_key, new_value, new_description, new_category)
+                            st.success("✅ 新しい設定を追加しました！")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ 設定の追加中にエラーが発生しました: {e}")
+                    else:
+                        st.warning("すべての項目を入力してください。")
 
 if __name__ == "__main__":
     main()
