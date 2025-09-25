@@ -16,6 +16,37 @@ import pickle
 # pandasの参照を保護
 pandas_lib = pd
 
+# 認証エラー用のヘルパー関数
+def show_auth_error_guidance(error_msg, context="AI生成"):
+    """認証エラー時の案内を表示する共通関数"""
+    st.error(f"🔐 **Google Cloud認証エラー ({context})**")
+    
+    # 認証関連のエラーかチェック
+    auth_keywords = ["credential", "authentication", "unauthorized", "permission", "quota", "token"]
+    is_auth_error = any(keyword.lower() in str(error_msg).lower() for keyword in auth_keywords)
+    
+    if is_auth_error:
+        st.markdown(f"""
+        **📋 認証エラーの解決方法:**
+        1. 左サイドバーの「**システム設定**」をクリック
+        2. 「**🔐 Google Cloud認証**」タブを開く
+        3. 認証情報を確認・再設定してください
+        
+        **💡 よくある原因:**
+        - 認証の有効期限切れ
+        - プロジェクト設定の不備
+        - API制限の到達
+        
+        **エラー詳細:** `{error_msg}`
+        """)
+        
+        if st.button("🔧 認証設定に移動", type="primary", key=f"auth_btn_{context}"):
+            st.session_state['redirect_to_settings'] = True
+            st.rerun()
+    else:
+        st.error(f"エラー詳細: {error_msg}")
+        st.info("💡 問題が継続する場合は、システム設定で認証状況を確認してください。")
+
 # --- 設定 ---
 project_id = os.environ.get("GCP_PROJECT")
 if not project_id:
@@ -454,17 +485,63 @@ def main():
             st.session_state.auth_done = True
         st.sidebar.success("✅ Googleサービス認証完了")
     except Exception as e:
-        st.sidebar.error(f"認証に失敗しました: {e}"); st.stop()
+        st.sidebar.error(f"🚨 Google Cloud認証エラー")
+        st.error("🔐 **Google Cloud認証が必要です**")
+        st.markdown(f"""
+        **エラー詳細:** `{e}`
+        
+        **📋 解決方法:**
+        1. 左サイドバーの「**システム設定**」をクリック
+        2. 「**🔐 Google Cloud認証**」タブを開く
+        3. 認証情報を設定するか、以下のコマンドを実行:
+        ```bash
+        gcloud auth application-default login --no-launch-browser
+        ```
+        
+        **💡 ヒント:** システム設定画面で認証状況を確認・管理できます。
+        """)
+        
+        # システム設定への直接リンクボタン
+        if st.button("🔧 システム設定に移動", type="primary", use_container_width=True):
+            st.session_state['redirect_to_settings'] = True
+            st.rerun()
+        
+        st.stop()
 
     if 'gemini_model' not in st.session_state:
         try:
             model_name = "gemini-1.5-pro"
             st.session_state.gemini_model = GenerativeModel(model_name)
         except Exception as e:
-            st.error(f"Geminiモデルのロードに失敗しました: {e}"); st.session_state.gemini_model = None
+            st.error("🤖 **Geminiモデルの初期化エラー**")
+            st.markdown(f"""
+            **エラー詳細:** `{e}`
+            
+            **📋 解決方法:**
+            1. 左サイドバーの「**システム設定**」をクリック
+            2. 「**🔐 Google Cloud認証**」タブで認証を確認
+            3. 認証が切れている場合は再設定してください
+            
+            **💡 よくある原因:**
+            - Google Cloud認証の有効期限切れ
+            - プロジェクトIDの設定不備
+            - Vertex AI APIの有効化不備
+            """)
+            
+            if st.button("🔧 認証設定を確認", type="primary", use_container_width=True):
+                st.session_state['redirect_to_settings'] = True
+                st.rerun()
+                
+            st.session_state.gemini_model = None
 
     st.sidebar.title("AIcast room")
-    page = st.sidebar.radio("メニュー", ["投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "システム設定"])
+    
+    # リダイレクト機能
+    if st.session_state.get('redirect_to_settings'):
+        page = "システム設定"
+        st.session_state.redirect_to_settings = False  # リセット
+    else:
+        page = st.sidebar.radio("メニュー", ["投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "システム設定"])
     if page == "投稿管理":
         casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
         if not casts:
@@ -481,8 +558,12 @@ def main():
                 if msg_type == "success": edit_status_placeholder.success(msg_content)
                 elif msg_type == "error": edit_status_placeholder.error(msg_content)
                 elif msg_type == "warning": edit_status_placeholder.warning(msg_content)
+                elif msg_type == "auth_error":
+                    with edit_status_placeholder.container():
+                        show_auth_error_guidance(msg_content, "投稿再生成")
                 del st.session_state.edit_status_message
-                time.sleep(2); edit_status_placeholder.empty()
+                if msg_type != "auth_error":  # 認証エラーの場合は自動で消さない
+                    time.sleep(2); edit_status_placeholder.empty()
 
             post_id = st.session_state.editing_post_id
             post = execute_query("SELECT p.*, c.name as cast_name FROM posts p JOIN casts c ON p.cast_id = c.id WHERE p.id = ?", (post_id,), fetch="one")
@@ -553,7 +634,12 @@ def main():
                             st.session_state[f"regen_char_limit_{post_id}"] = 140  # 文字数を初期値に
                             st.session_state.edit_status_message = ("success", "投稿を再生成しました！")
                         except Exception as e:
-                            st.session_state.edit_status_message = ("error", f"再生成中にエラーが発生しました: {str(e)}")
+                            # 認証エラーの可能性をチェック
+                            auth_keywords = ["credential", "authentication", "unauthorized", "permission", "quota", "token"]
+                            if any(keyword.lower() in str(e).lower() for keyword in auth_keywords):
+                                st.session_state.edit_status_message = ("auth_error", str(e))
+                            else:
+                                st.session_state.edit_status_message = ("error", f"再生成中にエラーが発生しました: {str(e)}")
                 st.rerun()
 
             if do_approve:
