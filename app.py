@@ -280,11 +280,11 @@ def send_to_google_sheets(cast_name, post_content, scheduled_datetime):
             spreadsheet = client.create("aicast_post")
             sheet = spreadsheet.sheet1
             # ヘッダー行を追加
-            sheet.append_row(["datetime", "cast_name", "content"])
+            sheet.append_row(["datetime", "content", "name"])
         
-        # データを追加（キャスト名も含める）
+        # データを追加（日時, 投稿内容, name の順）
         formatted_datetime = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([formatted_datetime, cast_name, post_content])
+        sheet.append_row([formatted_datetime, post_content, cast_name])
         
         return True, "Google Sheetsに送信しました。"
         
