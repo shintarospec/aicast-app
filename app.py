@@ -133,7 +133,7 @@ def init_db():
             ("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く", "お客様への接し方プレースホルダー", "キャスト管理"),
         ]
         for setting in default_settings:
-            execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", setting)
+            execute_query("INSERT OR REPLACE INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", setting)
     
     # 既存のpostsテーブルに新しいカラムを追加（マイグレーション）
     # カラムの存在確認と追加
@@ -151,6 +151,56 @@ def init_db():
     
     add_column_if_not_exists("posts", "sent_status", "TEXT DEFAULT 'not_sent'")
     add_column_if_not_exists("posts", "sent_at", "TEXT")
+
+def initialize_default_settings():
+    """デフォルト設定を初期化"""
+    # app_settingsテーブルが存在するか確認
+    tables = execute_query("SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'", fetch="all")
+    if not tables:
+        # テーブルが存在しない場合は作成
+        execute_query("""
+            CREATE TABLE app_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT UNIQUE NOT NULL,
+                value TEXT NOT NULL,
+                description TEXT,
+                category TEXT DEFAULT 'その他'
+            )
+        """)
+    
+    # デフォルト設定を挿入
+    default_settings = [
+        ("default_char_count", "300", "デフォルト文字数", "投稿生成"),
+        ("default_placeholder", "今日の出来事について教えて", "デフォルトプレースホルダー", "投稿生成"),
+        ("ai_temperature", "0.8", "AI創造性レベル", "AI設定"),
+        ("ai_max_tokens", "1000", "AI最大トークン数", "AI設定"),
+        ("ui_theme_color", "#FF6B6B", "テーマカラー", "UI設定"),
+        ("ui_sidebar_width", "300", "サイドバー幅", "UI設定"),
+        ("cast_name_placeholder", "星野 詩織", "名前プレースホルダー", "キャスト管理"),
+        ("cast_nickname_placeholder", "しおりん", "ニックネームプレースホルダー", "キャスト管理"),
+        ("cast_age_placeholder", "21歳", "年齢プレースホルダー", "キャスト管理"),
+        ("cast_birthday_placeholder", "10月26日", "誕生日プレースホルダー", "キャスト管理"),
+        ("cast_birthplace_placeholder", "神奈川県", "出身地プレースホルダー", "キャスト管理"),
+        ("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気。古着のワンピースをよく着ている。", "外見の特徴プレースホルダー", "キャスト管理"),
+        ("cast_personality_placeholder", "物静かで穏やかな聞き上手", "性格プレースホルダー", "キャスト管理"),
+        ("cast_strength_placeholder", "人の話に深く共感できる", "長所プレースホルダー", "キャスト管理"),
+        ("cast_weakness_placeholder", "少し人見知り", "短所プレースホルダー", "キャスト管理"),
+        ("cast_first_person_placeholder", "私", "一人称プレースホルダー", "キャスト管理"),
+        ("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い", "口調・語尾プレースホルダー", "キャスト管理"),
+        ("cast_catchphrase_placeholder", "「なんだか、素敵ですね」", "口癖プレースホルダー", "キャスト管理"),
+        ("cast_occupation_placeholder", "文学部の女子大生", "職業・学業プレースホルダー", "キャスト管理"),
+        ("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り", "趣味や特技プレースホルダー", "キャスト管理"),
+        ("cast_likes_placeholder", "雨の日の匂い、万年筆のインク", "好きなものプレースホルダー", "キャスト管理"),
+        ("cast_dislikes_placeholder", "大きな音、人混み", "嫌いなものプレースホルダー", "キャスト管理"),
+        ("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る", "休日の過ごし方プレースホルダー", "キャスト管理"),
+        ("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと", "将来の夢プレースホルダー", "キャスト管理"),
+        ("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから", "なぜこの仕事をしているのかプレースホルダー", "キャスト管理"),
+        ("cast_secret_placeholder", "実は、大のSF小説好き", "ちょっとした秘密プレースホルダー", "キャスト管理"),
+        ("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く", "お客様への接し方プレースホルダー", "キャスト管理"),
+    ]
+    
+    for key, value, description, category in default_settings:
+        execute_query("INSERT OR REPLACE INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", (key, value, description, category))
 
 def format_persona(cast_id, cast_data):
     if not cast_data: return "ペルソナデータがありません。"
@@ -396,6 +446,7 @@ def main():
     st.set_page_config(layout="wide")
     load_css("style.css")
     init_db()
+    initialize_default_settings()  # デフォルト設定を初期化
 
     try:
         if 'auth_done' not in st.session_state:
