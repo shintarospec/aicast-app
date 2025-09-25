@@ -109,6 +109,28 @@ def init_db():
             ("campaign_placeholder", "例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。", "一斉指示プレースホルダ", "UI設定"),
             ("name_pairs_placeholder", "例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜", "名前ペア入力プレースホルダ", "UI設定"),
             ("ai_generation_instruction", "魅力的で個性豊かなキャラクター", "AI生成時のデフォルト指示", "AI設定"),
+            # キャスト登録フォームのプレースホルダー
+            ("cast_name_placeholder", "@shiori_hoshino", "ユーザー名プレースホルダー", "キャスト管理"),
+            ("cast_nickname_placeholder", "星野 詩織", "名前（表示名）プレースホルダー", "キャスト管理"),
+            ("cast_age_placeholder", "21歳", "年齢プレースホルダー", "キャスト管理"),
+            ("cast_birthday_placeholder", "10月26日", "誕生日プレースホルダー", "キャスト管理"),
+            ("cast_birthplace_placeholder", "神奈川県", "出身地プレースホルダー", "キャスト管理"),
+            ("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気。古着のワンピースをよく着ている。", "外見の特徴プレースホルダー", "キャスト管理"),
+            ("cast_personality_placeholder", "物静かで穏やかな聞き上手", "性格プレースホルダー", "キャスト管理"),
+            ("cast_strength_placeholder", "人の話に深く共感できる", "長所プレースホルダー", "キャスト管理"),
+            ("cast_weakness_placeholder", "少し人見知り", "短所プレースホルダー", "キャスト管理"),
+            ("cast_first_person_placeholder", "私", "一人称プレースホルダー", "キャスト管理"),
+            ("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い", "口調・語尾プレースホルダー", "キャスト管理"),
+            ("cast_catchphrase_placeholder", "「なんだか、素敵ですね」", "口癖プレースホルダー", "キャスト管理"),
+            ("cast_occupation_placeholder", "文学部の女子大生", "職業／学業プレースホルダー", "キャスト管理"),
+            ("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り", "趣味や特技プレースホルダー", "キャスト管理"),
+            ("cast_likes_placeholder", "雨の日の匂い、万年筆のインク", "好きなものプレースホルダー", "キャスト管理"),
+            ("cast_dislikes_placeholder", "大きな音、人混み", "嫌いなものプレースホルダー", "キャスト管理"),
+            ("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る", "休日の過ごし方プレースホルダー", "キャスト管理"),
+            ("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと", "将来の夢プレースホルダー", "キャスト管理"),
+            ("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから", "なぜこの仕事をしているのかプレースホルダー", "キャスト管理"),
+            ("cast_secret_placeholder", "実は、大のSF小説好き", "ちょっとした秘密プレースホルダー", "キャスト管理"),
+            ("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く", "お客様への接し方プレースホルダー", "キャスト管理"),
         ]
         for setting in default_settings:
             execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", setting)
@@ -1019,21 +1041,50 @@ def main():
                     form_tabs = st.tabs(tab_names)
                     with form_tabs[0]:
                         c1, c2 = st.columns(2)
-                        new_name = c1.text_input("ユーザー名*", placeholder="@shiori_hoshino"); new_nickname = c2.text_input("名前（表示名）", placeholder="星野 詩織")
-                        new_age = c1.text_input("年齢", placeholder="21歳"); new_birthday = c2.text_input("誕生日", placeholder="10月26日")
-                        new_birthplace = c1.text_input("出身地", placeholder="神奈川県"); new_appearance = st.text_area("外見の特徴", placeholder="黒髪ロングで物静かな雰囲気...")
+                        # プレースホルダーを設定から取得
+                        cast_name_ph = get_app_setting("cast_name_placeholder", "@shiori_hoshino")
+                        cast_nickname_ph = get_app_setting("cast_nickname_placeholder", "星野 詩織")
+                        cast_age_ph = get_app_setting("cast_age_placeholder", "21歳")
+                        cast_birthday_ph = get_app_setting("cast_birthday_placeholder", "10月26日")
+                        cast_birthplace_ph = get_app_setting("cast_birthplace_placeholder", "神奈川県")
+                        cast_appearance_ph = get_app_setting("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気。古着のワンピースをよく着ている。")
+                        
+                        new_name = c1.text_input("ユーザー名*", placeholder=cast_name_ph); new_nickname = c2.text_input("名前（表示名）", placeholder=cast_nickname_ph)
+                        new_age = c1.text_input("年齢", placeholder=cast_age_ph); new_birthday = c2.text_input("誕生日", placeholder=cast_birthday_ph)
+                        new_birthplace = c1.text_input("出身地", placeholder=cast_birthplace_ph); new_appearance = st.text_area("外見の特徴", placeholder=cast_appearance_ph)
                     with form_tabs[1]:
                         c1, c2, c3 = st.columns(3)
-                        new_personality = c1.text_input("性格（一言で）", placeholder="物静かで穏やかな聞き上手"); new_strength = c2.text_input("長所", placeholder="人の話に深く共感できる")
-                        new_weakness = c3.text_input("短所", placeholder="少し人見知り"); new_first_person = c1.text_input("一人称", placeholder="私")
-                        new_speech_style = c2.text_area("口調・語尾", placeholder="です・ます調の丁寧な言葉遣い"); new_catchphrase = c3.text_input("口癖", placeholder="「なんだか、素敵ですね」")
-                        new_customer_interaction = st.text_area("お客様への接し方", placeholder="お客様の心に寄り添うように...")
+                        # プレースホルダーを設定から取得
+                        cast_personality_ph = get_app_setting("cast_personality_placeholder", "物静かで穏やかな聞き上手")
+                        cast_strength_ph = get_app_setting("cast_strength_placeholder", "人の話に深く共感できる")
+                        cast_weakness_ph = get_app_setting("cast_weakness_placeholder", "少し人見知り")
+                        cast_first_person_ph = get_app_setting("cast_first_person_placeholder", "私")
+                        cast_speech_style_ph = get_app_setting("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い")
+                        cast_catchphrase_ph = get_app_setting("cast_catchphrase_placeholder", "「なんだか、素敵ですね」")
+                        
+                        new_personality = c1.text_input("性格（一言で）", placeholder=cast_personality_ph); new_strength = c2.text_input("長所", placeholder=cast_strength_ph)
+                        new_weakness = c3.text_input("短所", placeholder=cast_weakness_ph); new_first_person = c1.text_input("一人称", placeholder=cast_first_person_ph)
+                        new_speech_style = c2.text_area("口調・語尾", placeholder=cast_speech_style_ph); new_catchphrase = c3.text_input("口癖", placeholder=cast_catchphrase_ph)
+                        cast_customer_interaction_ph = get_app_setting("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く")
+                        new_customer_interaction = st.text_area("お客様への接し方", placeholder=cast_customer_interaction_ph)
                     with form_tabs[2]:
                         c1, c2 = st.columns(2)
-                        new_occupation = c1.text_input("職業／学業", placeholder="文学部の女子大生"); new_hobby = c2.text_area("趣味や特技", placeholder="読書、フィルムカメラ...")
-                        new_likes = c1.text_area("好きなもの", placeholder="雨の日の匂い、万年筆のインク"); new_dislikes = c2.text_area("嫌いなもの", placeholder="大きな音、人混み")
-                        new_holiday_activity = st.text_area("休日の過ごし方", placeholder="一日中家で本を読んでいるか..."); new_dream = st.text_area("将来の夢", placeholder="自分の言葉で物語を紡ぐこと")
-                        new_reason_for_job = st.text_area("なぜこの仕事をしているのか", placeholder="様々な人の物語に触れたいから"); new_secret = st.text_area("ちょっとした秘密", placeholder="実は、大のSF小説好き")
+                        # プレースホルダーを設定から取得
+                        cast_occupation_ph = get_app_setting("cast_occupation_placeholder", "文学部の女子大生")
+                        cast_hobby_ph = get_app_setting("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り")
+                        
+                        new_occupation = c1.text_input("職業／学業", placeholder=cast_occupation_ph); new_hobby = c2.text_area("趣味や特技", placeholder=cast_hobby_ph)
+                        # プレースホルダーを設定から取得
+                        cast_likes_ph = get_app_setting("cast_likes_placeholder", "雨の日の匂い、万年筆のインク")
+                        cast_dislikes_ph = get_app_setting("cast_dislikes_placeholder", "大きな音、人混み")
+                        cast_holiday_activity_ph = get_app_setting("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る")
+                        cast_dream_ph = get_app_setting("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと")
+                        cast_reason_for_job_ph = get_app_setting("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから")
+                        cast_secret_ph = get_app_setting("cast_secret_placeholder", "実は、大のSF小説好き")
+                        
+                        new_likes = c1.text_area("好きなもの", placeholder=cast_likes_ph); new_dislikes = c2.text_area("嫌いなもの", placeholder=cast_dislikes_ph)
+                        new_holiday_activity = st.text_area("休日の過ごし方", placeholder=cast_holiday_activity_ph); new_dream = st.text_area("将来の夢", placeholder=cast_dream_ph)
+                        new_reason_for_job = st.text_area("なぜこの仕事をしているのか", placeholder=cast_reason_for_job_ph); new_secret = st.text_area("ちょっとした秘密", placeholder=cast_secret_ph)
                     with form_tabs[3]:
                         st.info("このキャストが投稿を生成する際に使用できるシチュエーションのカテゴリを選択してください。")
                         if not category_options:
@@ -1105,22 +1156,49 @@ def main():
                             t1, t2, t3, t4, t5 = edit_tabs[:5]
                             with t1:
                                 c1, c2 = st.columns(2)
-                                edit_name = c1.text_input("ユーザー名*", value=cast_data_to_edit.get('name', ''))
-                                edit_nickname = c2.text_input("名前（表示名）", value=cast_data_to_edit.get('nickname', '')); edit_age = c1.text_input("年齢", value=cast_data_to_edit.get('age', ''))
-                                edit_appearance = st.text_area("外見の特徴", value=cast_data_to_edit.get('appearance', '')); edit_birthday = c1.text_input("誕生日", value=cast_data_to_edit.get('birthday', ''))
-                                edit_birthplace = c2.text_input("出身地", value=cast_data_to_edit.get('birthplace', ''))
+                                # プレースホルダーを設定から取得
+                                cast_name_ph = get_app_setting("cast_name_placeholder", "星野 詩織")
+                                cast_nickname_ph = get_app_setting("cast_nickname_placeholder", "しおりん")
+                                cast_age_ph = get_app_setting("cast_age_placeholder", "21歳")
+                                cast_appearance_ph = get_app_setting("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気")
+                                cast_birthday_ph = get_app_setting("cast_birthday_placeholder", "10月26日")
+                                cast_birthplace_ph = get_app_setting("cast_birthplace_placeholder", "神奈川県")
+                                
+                                edit_name = c1.text_input("ユーザー名*", value=cast_data_to_edit.get('name', ''), placeholder=cast_name_ph)
+                                edit_nickname = c2.text_input("名前（表示名）", value=cast_data_to_edit.get('nickname', ''), placeholder=cast_nickname_ph); edit_age = c1.text_input("年齢", value=cast_data_to_edit.get('age', ''), placeholder=cast_age_ph)
+                                edit_appearance = st.text_area("外見の特徴", value=cast_data_to_edit.get('appearance', ''), placeholder=cast_appearance_ph); edit_birthday = c1.text_input("誕生日", value=cast_data_to_edit.get('birthday', ''), placeholder=cast_birthday_ph)
+                                edit_birthplace = c2.text_input("出身地", value=cast_data_to_edit.get('birthplace', ''), placeholder=cast_birthplace_ph)
                             with t2:
                                 c1, c2, c3 = st.columns(3)
-                                edit_personality = c1.text_input("性格（一言で）", value=cast_data_to_edit.get('personality', '')); edit_strength = c2.text_input("長所", value=cast_data_to_edit.get('strength', ''))
-                                edit_weakness = c3.text_input("短所", value=cast_data_to_edit.get('weakness', '')); edit_first_person = c1.text_input("一人称", value=cast_data_to_edit.get('first_person', ''))
-                                edit_speech_style = c2.text_area("口調・語尾", value=cast_data_to_edit.get('speech_style', '')); edit_catchphrase = c3.text_input("口癖", value=cast_data_to_edit.get('catchphrase', ''))
-                                edit_customer_interaction = st.text_area("お客様への接し方", value=cast_data_to_edit.get('customer_interaction', ''))
+                                # プレースホルダーを設定から取得
+                                cast_personality_ph = get_app_setting("cast_personality_placeholder", "物静かで穏やかな聞き上手")
+                                cast_strength_ph = get_app_setting("cast_strength_placeholder", "人の話に深く共感できる")
+                                cast_weakness_ph = get_app_setting("cast_weakness_placeholder", "少し人見知り")
+                                cast_first_person_ph = get_app_setting("cast_first_person_placeholder", "私")
+                                cast_speech_style_ph = get_app_setting("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い")
+                                cast_catchphrase_ph = get_app_setting("cast_catchphrase_placeholder", "「なんだか、素敵ですね」")
+                                cast_customer_interaction_ph = get_app_setting("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く")
+                                
+                                edit_personality = c1.text_input("性格（一言で）", value=cast_data_to_edit.get('personality', ''), placeholder=cast_personality_ph); edit_strength = c2.text_input("長所", value=cast_data_to_edit.get('strength', ''), placeholder=cast_strength_ph)
+                                edit_weakness = c3.text_input("短所", value=cast_data_to_edit.get('weakness', ''), placeholder=cast_weakness_ph); edit_first_person = c1.text_input("一人称", value=cast_data_to_edit.get('first_person', ''), placeholder=cast_first_person_ph)
+                                edit_speech_style = c2.text_area("口調・語尾", value=cast_data_to_edit.get('speech_style', ''), placeholder=cast_speech_style_ph); edit_catchphrase = c3.text_input("口癖", value=cast_data_to_edit.get('catchphrase', ''), placeholder=cast_catchphrase_ph)
+                                edit_customer_interaction = st.text_area("お客様への接し方", value=cast_data_to_edit.get('customer_interaction', ''), placeholder=cast_customer_interaction_ph)
                             with t3:
                                 c1, c2 = st.columns(2)
-                                edit_occupation = c1.text_input("職業／学業", value=cast_data_to_edit.get('occupation', '')); edit_hobby = c2.text_area("趣味や特技", value=cast_data_to_edit.get('hobby', ''))
-                                edit_likes = c1.text_area("好きなもの", value=cast_data_to_edit.get('likes', '')); edit_dislikes = c2.text_area("嫌いなもの", value=cast_data_to_edit.get('dislikes', ''))
-                                edit_holiday_activity = st.text_area("休日の過ごし方", value=cast_data_to_edit.get('holiday_activity', '')); edit_dream = st.text_area("将来の夢", value=cast_data_to_edit.get('dream', ''))
-                                edit_reason_for_job = st.text_area("なぜこの仕事をしているのか", value=cast_data_to_edit.get('reason_for_job', '')); edit_secret = st.text_area("ちょっとした秘密", value=cast_data_to_edit.get('secret', ''))
+                                # プレースホルダーを設定から取得
+                                cast_occupation_ph = get_app_setting("cast_occupation_placeholder", "文学部の女子大生")
+                                cast_hobby_ph = get_app_setting("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り")
+                                cast_likes_ph = get_app_setting("cast_likes_placeholder", "雨の日の匂い、万年筆のインク")
+                                cast_dislikes_ph = get_app_setting("cast_dislikes_placeholder", "大きな音、人混み")
+                                cast_holiday_activity_ph = get_app_setting("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る")
+                                cast_dream_ph = get_app_setting("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと")
+                                cast_reason_for_job_ph = get_app_setting("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから")
+                                cast_secret_ph = get_app_setting("cast_secret_placeholder", "実は、大のSF小説好き")
+                                
+                                edit_occupation = c1.text_input("職業／学業", value=cast_data_to_edit.get('occupation', ''), placeholder=cast_occupation_ph); edit_hobby = c2.text_area("趣味や特技", value=cast_data_to_edit.get('hobby', ''), placeholder=cast_hobby_ph)
+                                edit_likes = c1.text_area("好きなもの", value=cast_data_to_edit.get('likes', ''), placeholder=cast_likes_ph); edit_dislikes = c2.text_area("嫌いなもの", value=cast_data_to_edit.get('dislikes', ''), placeholder=cast_dislikes_ph)
+                                edit_holiday_activity = st.text_area("休日の過ごし方", value=cast_data_to_edit.get('holiday_activity', ''), placeholder=cast_holiday_activity_ph); edit_dream = st.text_area("将来の夢", value=cast_data_to_edit.get('dream', ''), placeholder=cast_dream_ph)
+                                edit_reason_for_job = st.text_area("なぜこの仕事をしているのか", value=cast_data_to_edit.get('reason_for_job', ''), placeholder=cast_reason_for_job_ph); edit_secret = st.text_area("ちょっとした秘密", value=cast_data_to_edit.get('secret', ''), placeholder=cast_secret_ph)
                             with t4:
                                 allowed_categories_str = cast_data_to_edit.get('allowed_categories')
                                 current_allowed = allowed_categories_str.split(',') if allowed_categories_str else []
