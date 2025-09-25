@@ -1956,8 +1956,104 @@ def main():
         st.title("⚙️ システム設定")
         st.markdown("アプリケーションの各種設定を管理します。")
         
-        st.subheader("🗃️ Google Sheets 連携設定")
-        st.markdown("Google Sheets APIを使用して投稿を送信するための認証設定を行います。")
+        # タブ作成
+        auth_tab, sheets_tab, app_settings_tab = st.tabs(["🔐 Google Cloud認証", "🗃️ Google Sheets連携", "🔧 アプリ設定"])
+        
+        with auth_tab:
+            st.subheader("🔐 Google Cloud Application Default Credentials")
+            st.markdown("Google Cloud認証を設定します。通常はコマンドライン `gcloud auth application-default login --no-launch-browser` で行う処理をGUIで実行できます。")
+            
+            # 現在の認証状況確認
+            adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+            if os.path.exists(adc_file):
+                st.success("✅ Google Cloud Application Default Credentials が設定済みです")
+                
+                # 認証情報の詳細表示
+                try:
+                    with open(adc_file, 'r') as f:
+                        import json
+                        creds = json.load(f)
+                        if 'client_id' in creds:
+                            masked_client_id = creds['client_id'][:20] + "..." if len(creds['client_id']) > 20 else creds['client_id']
+                            st.info(f"📋 クライアントID: {masked_client_id}")
+                        if 'type' in creds:
+                            st.info(f"📋 認証タイプ: {creds['type']}")
+                except Exception as e:
+                    st.warning(f"認証情報の読み取り中にエラーが発生しました: {e}")
+                
+                col1, col2 = st.columns(2)
+                if col1.button("🔄 認証を更新", type="primary"):
+                    st.info("認証更新機能は準備中です。現在はコマンドラインで `gcloud auth application-default login --no-launch-browser` を実行してください。")
+                    
+                if col2.button("🗑️ 認証を削除", type="secondary"):
+                    try:
+                        os.remove(adc_file)
+                        st.success("認証情報を削除しました。ページを更新してください。")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"認証情報の削除中にエラーが発生しました: {e}")
+                        
+            else:
+                st.warning("⚠️ Google Cloud Application Default Credentials が設定されていません")
+                
+                st.markdown("""
+                **設定方法:**
+                1. 下記のフォームに認証情報を入力
+                2. または、コマンドラインで以下を実行:
+                ```bash
+                gcloud auth application-default login --no-launch-browser
+                ```
+                """)
+                
+                with st.form("gcloud_auth_form"):
+                    st.markdown("**手動認証設定（上級者向け）:**")
+                    auth_json = st.text_area(
+                        "Application Default Credentials JSON",
+                        height=200,
+                        placeholder='''{
+  "client_id": "your-client-id.googleusercontent.com",
+  "client_secret": "your-client-secret",
+  "refresh_token": "your-refresh-token",
+  "type": "authorized_user"
+}'''
+                    )
+                    
+                    if st.form_submit_button("🔐 認証情報を保存", type="primary"):
+                        if auth_json.strip():
+                            try:
+                                import json
+                                auth_data = json.loads(auth_json)
+                                
+                                # 必要なフィールドの確認
+                                required_fields = ["client_id", "client_secret", "refresh_token", "type"]
+                                missing_fields = [field for field in required_fields if field not in auth_data]
+                                
+                                if missing_fields:
+                                    st.error(f"必要なフィールドが不足しています: {', '.join(missing_fields)}")
+                                else:
+                                    # ディレクトリ作成
+                                    os.makedirs(os.path.dirname(adc_file), exist_ok=True)
+                                    
+                                    # 認証ファイル保存
+                                    with open(adc_file, 'w', encoding='utf-8') as f:
+                                        json.dump(auth_data, f, indent=2, ensure_ascii=False)
+                                    
+                                    st.success("✅ Google Cloud認証情報を保存しました！ページを更新してください。")
+                                    st.rerun()
+                                    
+                            except json.JSONDecodeError as e:
+                                st.error(f"JSONの解析に失敗しました: {e}")
+                            except Exception as e:
+                                st.error(f"認証情報の保存中にエラーが発生しました: {e}")
+                        else:
+                            st.warning("認証情報のJSONを入力してください。")
+                            
+                st.markdown("---")
+                st.markdown("**💡 ヒント:** 通常は `gcloud` コマンドラインツールを使用することを推奨します。")
+        
+        with sheets_tab:
+            st.subheader("🗃️ Google Sheets 連携設定")
+            st.markdown("Google Sheets APIを使用して投稿を送信するための認証設定を行います。")
         
         with st.expander("OAuth認証情報の設定", expanded=True):
             st.markdown("""
@@ -2034,9 +2130,10 @@ def main():
                         else:
                             st.warning("JSON内容を入力してください。")
         
-        st.subheader("🔧 アプリケーション設定")
-        
-        # 設定をカテゴリ別に取得
+        with app_settings_tab:
+            st.subheader("🔧 アプリケーション設定")
+            
+            # 設定をカテゴリ別に取得
         all_settings = execute_query("SELECT * FROM app_settings ORDER BY category, key", fetch="all")
         if all_settings:
             settings_by_category = {}
@@ -2108,26 +2205,26 @@ def main():
             st.info("設定項目がありません。初期化中...")
             st.rerun()
         
-        st.markdown("---")
-        st.subheader("⚙️ 設定の追加")
-        with st.expander("新しい設定項目を追加", expanded=False):
-            with st.form("add_setting_form"):
-                col1, col2 = st.columns(2)
-                new_key = col1.text_input("設定キー", placeholder="例：default_timeout")
-                new_category = col2.selectbox("カテゴリ", ["投稿生成", "UI設定", "AI設定", "その他"])
-                new_description = st.text_input("説明", placeholder="例：タイムアウト時間（秒）")
-                new_value = st.text_input("初期値", placeholder="例：30")
-                
-                if st.form_submit_button("➕ 設定を追加"):
-                    if new_key and new_value and new_description:
-                        try:
-                            update_app_setting(new_key, new_value, new_description, new_category)
-                            st.success("✅ 新しい設定を追加しました！")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 設定の追加中にエラーが発生しました: {e}")
-                    else:
-                        st.warning("すべての項目を入力してください。")
+            st.markdown("---")
+            st.subheader("⚙️ 設定の追加")
+            with st.expander("新しい設定項目を追加", expanded=False):
+                with st.form("add_setting_form"):
+                    col1, col2 = st.columns(2)
+                    new_key = col1.text_input("設定キー", placeholder="例：default_timeout")
+                    new_category = col2.selectbox("カテゴリ", ["投稿生成", "UI設定", "AI設定", "その他"])
+                    new_description = st.text_input("説明", placeholder="例：タイムアウト時間（秒）")
+                    new_value = st.text_input("初期値", placeholder="例：30")
+                    
+                    if st.form_submit_button("➕ 設定を追加"):
+                        if new_key and new_value and new_description:
+                            try:
+                                update_app_setting(new_key, new_value, new_description, new_category)
+                                st.success("✅ 新しい設定を追加しました！")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 設定の追加中にエラーが発生しました: {e}")
+                        else:
+                            st.warning("すべての項目を入力してください。")
 
 if __name__ == "__main__":
     main()
