@@ -158,6 +158,7 @@ def parse_ai_profile(ai_text, name, nickname, categories):
     
     # 正規表現パターンでフィールドを抽出
     patterns = {
+        'nickname': r'ニックネーム[：:\s]*([^\n]+)',
         'age': r'年齢[：:\s]*([^\n]+)',
         'birthday': r'誕生日[：:\s]*([^\n]+)',
         'birthplace': r'出身地[：:\s]*([^\n]+)',
@@ -1331,6 +1332,7 @@ def main():
 以下の項目を必ず含めて、自然で魅力的なキャラクタープロフィールを作成してください：
 
 **基本情報**
+- ニックネーム: （親しみやすい呼び方）
 - 年齢: （具体的な年齢）
 - 誕生日: （月日）
 - 出身地: （都道府県）
@@ -1366,7 +1368,7 @@ def main():
                                     ai_profile = response.text
                                     
                                     # AI出力を解析してフィールドに分割
-                                    cast_data = parse_ai_profile(ai_profile, display_name, username, gen_categories)
+                                    cast_data = parse_ai_profile(ai_profile, username, display_name, gen_categories)
                                     generated_casts.append(cast_data)
                                     
                                     time.sleep(2)  # API制限を考慮
