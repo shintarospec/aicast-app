@@ -8,6 +8,13 @@ import vertexai
 from vertexai.preview.generative_models import GenerativeModel
 import os
 import io
+import re
+import gspread
+from google.oauth2.service_account import Credentials
+import pickle
+
+# pandasの参照を保護
+pandas_lib = pd
 
 # --- 設定 ---
 project_id = os.environ.get("GCP_PROJECT")
@@ -58,7 +65,7 @@ def init_db():
     """データベースとテーブルを初期化する"""
     persona_columns = ", ".join([f"{field} TEXT" for field in PERSONA_FIELDS if field != 'name'])
     casts_table_query = f"CREATE TABLE IF NOT EXISTS casts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, {persona_columns})"
-    posts_table_query = "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, cast_id INTEGER, created_at TEXT, content TEXT, theme TEXT, evaluation TEXT, advice TEXT, free_advice TEXT, status TEXT DEFAULT 'draft', posted_at TEXT, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
+    posts_table_query = "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, cast_id INTEGER, created_at TEXT, content TEXT, theme TEXT, evaluation TEXT, advice TEXT, free_advice TEXT, status TEXT DEFAULT 'draft', posted_at TEXT, sent_status TEXT DEFAULT 'not_sent', sent_at TEXT, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
     situations_table_query = "CREATE TABLE IF NOT EXISTS situations (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE, time_slot TEXT DEFAULT 'いつでも', category_id INTEGER, FOREIGN KEY(category_id) REFERENCES situation_categories(id) ON DELETE CASCADE)"
     categories_table_query = "CREATE TABLE IF NOT EXISTS situation_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)"
     advice_table_query = 'CREATE TABLE IF NOT EXISTS advice_master (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE)'
@@ -66,8 +73,9 @@ def init_db():
     cast_groups_table_query = "CREATE TABLE IF NOT EXISTS cast_groups (cast_id INTEGER, group_id INTEGER, PRIMARY KEY (cast_id, group_id), FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE, FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE)"
     tuning_history_table_query = "CREATE TABLE IF NOT EXISTS tuning_history (id INTEGER PRIMARY KEY, post_id INTEGER, timestamp TEXT, previous_content TEXT, advice_used TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
     custom_fields_table_query = "CREATE TABLE IF NOT EXISTS custom_fields (id INTEGER PRIMARY KEY, field_name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, field_type TEXT DEFAULT 'text', placeholder TEXT DEFAULT '', is_required INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0)"
+    send_history_table_query = "CREATE TABLE IF NOT EXISTS send_history (id INTEGER PRIMARY KEY, post_id INTEGER, destination TEXT, sent_at TEXT, scheduled_datetime TEXT, status TEXT DEFAULT 'pending', error_message TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
 
-    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query]
+    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query]
     for query in queries: execute_query(query)
     
     if execute_query("SELECT COUNT(*) as c FROM situation_categories", fetch="one")['c'] == 0:
@@ -90,6 +98,23 @@ def init_db():
     if execute_query("SELECT COUNT(*) as c FROM advice_master", fetch="one")['c'] == 0:
         default_advice = [("もっと可愛く",), ("もっと大人っぽく",), ("意外な一面を見せて",), ("豆知識を加えて",), ("句読点を工夫して",), ("少しユーモアを",)]
         for adv in default_advice: execute_query("INSERT INTO advice_master (content) VALUES (?)", adv)
+    
+    # 既存のpostsテーブルに新しいカラムを追加（マイグレーション）
+    # カラムの存在確認と追加
+    def add_column_if_not_exists(table_name, column_name, column_definition):
+        try:
+            # カラムの存在確認
+            cursor_info = execute_query(f"PRAGMA table_info({table_name})", fetch="all")
+            existing_columns = [col['name'] for col in cursor_info] if cursor_info else []
+            
+            if column_name not in existing_columns:
+                execute_query(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+        except Exception as e:
+            # すでに存在する場合やその他のエラーは無視
+            pass
+    
+    add_column_if_not_exists("posts", "sent_status", "TEXT DEFAULT 'not_sent'")
+    add_column_if_not_exists("posts", "sent_at", "TEXT")
 
 def format_persona(cast_id, cast_data):
     if not cast_data: return "ペルソナデータがありません。"
@@ -120,6 +145,151 @@ def get_dynamic_persona_fields():
         custom_field_names = [field['field_name'] for field in custom_fields]
         return PERSONA_FIELDS + custom_field_names
     return PERSONA_FIELDS
+
+def parse_ai_profile(ai_text, name, nickname, categories):
+    """AIが生成したプロフィールテキストを構造化データに変換"""
+    import re
+    
+    # デフォルト値
+    cast_data = {field: "" for field in PERSONA_FIELDS}
+    cast_data['name'] = name
+    cast_data['nickname'] = nickname  # 入力された表示名を使用
+    cast_data['allowed_categories'] = ",".join(categories)
+    
+    # 正規表現パターンでフィールドを抽出
+    patterns = {
+        'age': r'年齢[：:\s]*([^\n]+)',
+        'birthday': r'誕生日[：:\s]*([^\n]+)',
+        'birthplace': r'出身地[：:\s]*([^\n]+)',
+        'appearance': r'外見[の特徴：:\s]*([^\n]+)',
+        'personality': r'性格[：:\s]*([^\n]+)',
+        'strength': r'長所[：:\s]*([^\n]+)',
+        'weakness': r'短所[：:\s]*([^\n]+)',
+        'first_person': r'一人称[：:\s]*([^\n]+)',
+        'speech_style': r'口調[・語尾：:\s]*([^\n]+)',
+        'catchphrase': r'口癖[：:\s]*([^\n]+)',
+        'customer_interaction': r'お客様への接し方[：:\s]*([^\n]+)',
+        'occupation': r'職業[／/学業：:\s]*([^\n]+)',
+        'hobby': r'趣味[や特技：:\s]*([^\n]+)',
+        'likes': r'好きなもの[：:\s]*([^\n]+)',
+        'dislikes': r'嫌いなもの[：:\s]*([^\n]+)',
+        'holiday_activity': r'休日の過ごし方[：:\s]*([^\n]+)',
+        'dream': r'将来の夢[：:\s]*([^\n]+)',
+        'reason_for_job': r'なぜこの仕事[をしているのか：:\s]*([^\n]+)',
+        'secret': r'ちょっとした秘密[：:\s]*([^\n]+)'
+    }
+    
+    # パターンマッチングで情報を抽出
+    for field, pattern in patterns.items():
+        match = re.search(pattern, ai_text, re.IGNORECASE)
+        if match:
+            value = match.group(1).strip()
+            # 「」で囲まれている場合は除去
+            value = re.sub(r'^[「『"]([^」』"]+)[」』"]$', r'\1', value)
+            cast_data[field] = value
+    
+    # フォールバック：基本的な値が取得できなかった場合のデフォルト設定
+    if not cast_data['nickname']:
+        cast_data['nickname'] = name.split()[-1] if ' ' in name else name
+    if not cast_data['age']:
+        cast_data['age'] = "20歳"
+    if not cast_data['first_person']:
+        cast_data['first_person'] = "私"
+    if not cast_data['speech_style']:
+        cast_data['speech_style'] = "です・ます調"
+    if not cast_data['personality']:
+        cast_data['personality'] = "明るく親しみやすい"
+    
+    return cast_data
+
+def setup_google_sheets_oauth():
+    """Google Sheets OAuth認証の初期設定"""
+    try:
+        from google.auth.transport.requests import Request
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        import pickle
+        
+        SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        
+        creds = None
+        token_path = "credentials/token.pickle"
+        credentials_path = "credentials/credentials.json"
+        
+        # 既存のトークンを確認
+        if os.path.exists(token_path):
+            with open(token_path, 'rb') as token:
+                creds = pickle.load(token)
+        
+        # 認証が必要な場合
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not os.path.exists(credentials_path):
+                    return None, "OAuth認証ファイルが見つかりません。設定が必要です。"
+                
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
+                creds = flow.run_local_server(port=0)
+            
+            # トークンを保存
+            os.makedirs("credentials", exist_ok=True)
+            with open(token_path, 'wb') as token:
+                pickle.dump(creds, token)
+        
+        return creds, "認証成功"
+    except Exception as e:
+        return None, f"OAuth認証エラー: {str(e)}"
+
+def send_to_google_sheets(post_content, scheduled_datetime):
+    """Google Sheetsにデータを送信する"""
+    try:
+        os.makedirs("credentials", exist_ok=True)
+        credentials_path = "credentials/credentials.json"
+        
+        # OAuth認証ファイルの確認
+        if not os.path.exists(credentials_path):
+            setup_message = """Google Sheets連携の設定が必要です。
+
+【OAuth認証設定手順】
+1. [Google Cloud Console](https://console.cloud.google.com) にアクセス
+2. 新しいプロジェクトを作成または既存プロジェクト選択
+3. 「APIとサービス」> 「ライブラリ」で以下を有効化：
+   - Google Sheets API
+   - Google Drive API
+4. 「APIとサービス」> 「認証情報」> 「認証情報を作成」> 「OAuthクライアントID」
+5. アプリケーションの種類：「デスクトップアプリケーション」
+6. 作成されたクライアントIDの右側の「ダウンロード」ボタンをクリック
+7. ダウンロードしたJSONファイルを `credentials/credentials.json` として保存
+8. アプリを再起動して送信を試行（ブラウザでの認証が開始されます）
+
+設定完了後、再度送信をお試しください。"""
+            return False, setup_message
+        
+        # OAuth認証を実行
+        creds, auth_message = setup_google_sheets_oauth()
+        if not creds:
+            return False, auth_message
+        
+        client = gspread.authorize(creds)
+        
+        # スプレッドシートを開く（存在しない場合は作成）
+        try:
+            sheet = client.open("aicast_post").sheet1
+        except gspread.SpreadsheetNotFound:
+            # スプレッドシートが存在しない場合は作成
+            spreadsheet = client.create("aicast_post")
+            sheet = spreadsheet.sheet1
+            # ヘッダー行を追加
+            sheet.append_row(["datetime", "content"])
+        
+        # データを追加
+        formatted_datetime = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        sheet.append_row([formatted_datetime, post_content])
+        
+        return True, "Google Sheetsに送信しました。"
+        
+    except Exception as e:
+        return False, f"Google Sheets送信エラー: {str(e)}"
 
 def add_column_to_casts_table(field_name):
     """castsテーブルに新しい列を追加"""
@@ -193,9 +363,9 @@ def main():
             st.error(f"Geminiモデルのロードに失敗しました: {e}"); st.session_state.gemini_model = None
 
     st.sidebar.title("AIcast room")
-    page = st.sidebar.radio("メニュー", ["投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理"])
+    page = st.sidebar.radio("メニュー", ["投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "システム設定"])
     if page == "投稿管理":
-        casts = execute_query("SELECT id, name FROM casts ORDER BY name", fetch="all")
+        casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
         if not casts:
             st.warning("キャスト未登録です。「キャスト管理」で作成してください。"); st.stop()
 
@@ -329,8 +499,25 @@ def main():
                 time.sleep(2); top_status_placeholder.empty()
 
             def update_selected_cast():
-                st.session_state.selected_cast_name = st.session_state.cast_selector
-            selected_cast_name = st.selectbox("キャストを選択", [c['name'] for c in casts], key='cast_selector', index=[c['name'] for c in casts].index(st.session_state.selected_cast_name), on_change=update_selected_cast)
+                # 表示名から実際のキャスト名に変換
+                display_name = st.session_state.cast_selector
+                st.session_state.selected_cast_name = cast_name_mapping[display_name]
+            
+            # キャスト表示名を「name（nickname）」形式で作成
+            cast_display_options = []
+            cast_name_mapping = {}
+            for c in casts:
+                display_name = f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']
+                cast_display_options.append(display_name)
+                cast_name_mapping[display_name] = c['name']
+            
+            # 現在選択されているキャストの表示名を取得
+            current_cast = next((c for c in casts if c['name'] == st.session_state.selected_cast_name), None)
+            current_display = f"{current_cast['name']}（{current_cast['nickname']}）" if current_cast and current_cast['nickname'] else st.session_state.selected_cast_name
+            current_index = cast_display_options.index(current_display) if current_display in cast_display_options else 0
+            
+            selected_display_name = st.selectbox("キャストを選択", cast_display_options, key='cast_selector', index=current_index, on_change=update_selected_cast)
+            selected_cast_name = cast_name_mapping[selected_display_name]
             selected_cast_id = next((c['id'] for c in casts if c['name'] == selected_cast_name), None)
             selected_cast_details_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
             selected_cast_details = dict(selected_cast_details_row) if selected_cast_details_row else None
@@ -383,8 +570,11 @@ def main():
                         top_status_placeholder.error("AIモデルの読み込みに失敗しているため、投稿を生成できません。")
 
             st.markdown("---")
-            st.header(f"「{selected_cast_name}」の投稿一覧")
-            tab1, tab2, tab3 = st.tabs(["投稿案 (Drafts)", "承認済み (Approved)", "却下済み (Rejected)"])
+            # 選択されたキャストの表示名を作成
+            current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
+            cast_display_name = f"{current_cast['name']}（{current_cast['nickname']}）" if current_cast and current_cast['nickname'] else selected_cast_name
+            st.header(f"「{cast_display_name}」の投稿一覧")
+            tab1, tab2, tab3, tab4 = st.tabs(["投稿案 (Drafts)", "承認済み (Approved)", "送信済み (Sent)", "却下済み (Rejected)"])
 
             with tab1:
                 draft_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'draft' ORDER BY created_at DESC", (selected_cast_id,), fetch="all")
@@ -405,25 +595,127 @@ def main():
                 else: st.info("チューニング対象の投稿案はありません。")
 
             with tab2:
-                approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
+                # Google Sheets連携の設定状況を表示
+                credentials_path = "credentials/credentials.json"
+                token_path = "credentials/token.pickle"
+                
+                if os.path.exists(token_path):
+                    st.success("✅ Google Sheets連携設定済み（OAuth認証完了）", icon="🔗")
+                elif os.path.exists(credentials_path):
+                    st.info("📋 OAuth認証ファイル設定済み（初回送信時にブラウザ認証が開始されます）", icon="🔐")
+                else:
+                    with st.expander("⚠️ Google Sheets連携未設定（OAuth設定方法を表示）", expanded=False):
+                        st.warning("""Google Sheets送信機能を使用するにはOAuth認証設定が必要です。
+
+【OAuth認証設定手順】
+1. [Google Cloud Console](https://console.cloud.google.com) にアクセス
+2. 新しいプロジェクトを作成または既存プロジェクト選択
+3. 「APIとサービス」> 「ライブラリ」で以下を有効化：
+   - **Google Sheets API**
+   - **Google Drive API**
+4. 「APIとサービス」> 「認証情報」> 「認証情報を作成」> **「OAuthクライアントID」**
+5. 同意画面の設定（初回のみ）：
+   - ユーザータイプ：**外部**
+   - アプリ名、メールアドレスを入力
+6. OAuthクライアントID作成：
+   - アプリケーションの種類：**「デスクトップアプリケーション」**
+   - 名前：任意（例：AIcast Room）
+7. **ダウンロードボタン**をクリックしてJSONファイルを取得
+8. ダウンロードしたファイルを **`credentials/credentials.json`** として保存
+9. アプリを再起動して送信ボタンをクリック（ブラウザで認証画面が開きます）
+
+**注意**: 初回送信時にブラウザでGoogle認証が必要です。認証後はトークンが自動保存されます。""")
+                
+                approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
                 if approved_posts:
-                    st.info(f"{len(approved_posts)}件の投稿が承認されています。")
+                    st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
                     for post in approved_posts:
-                        col_content, col_action = st.columns([4,1])
-                        with col_content:
-                            full_advice_list = []; 
-                            if post['advice']: full_advice_list.extend(post['advice'].split(','))
-                            if post['free_advice']: full_advice_list.append(post['free_advice'])
-                            full_advice_str = ", ".join(full_advice_list)
-                            st.caption(f"投稿時間: {post['posted_at']} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}")
-                            st.success(post['content'], icon="✔")
-                        with col_action:
-                            if st.button("↩️ 投稿案に戻す", key=f"revert_{post['id']}", use_container_width=True):
-                                execute_query("UPDATE posts SET status = 'draft', posted_at = NULL WHERE id = ?", (post['id'],))
-                                st.session_state.page_status_message = ("success", "投稿を「投稿案」に戻しました。"); st.rerun()
+                        with st.container():
+                            col_content, col_datetime, col_action = st.columns([3,1,1])
+                            with col_content:
+                                full_advice_list = []; 
+                                if post['advice']: full_advice_list.extend(post['advice'].split(','))
+                                if post['free_advice']: full_advice_list.append(post['free_advice'])
+                                full_advice_str = ", ".join(full_advice_list)
+                                st.caption(f"投稿時間: {post['posted_at']} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}")
+                                st.success(post['content'], icon="✔")
+                            
+                            with col_datetime:
+                                # 投稿の元の時刻を取得
+                                original_datetime = datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S')
+                                
+                                st.caption(f"🕒 元の投稿時刻: {original_datetime.strftime('%H:%M')}")
+                                
+                                # 日時選択オプション
+                                time_options = [
+                                    ("元の投稿時刻を使用", original_datetime),
+                                    ("カスタム時刻を指定", None)
+                                ]
+                                
+                                selected_option = st.selectbox(
+                                    "送信時刻の設定", 
+                                    options=[opt[0] for opt in time_options],
+                                    key=f"time_option_{post['id']}"
+                                )
+                                
+                                if selected_option == "元の投稿時刻を使用":
+                                    scheduled_datetime = original_datetime
+                                    st.info(f"📅 {original_datetime.strftime('%Y-%m-%d %H:%M')} で送信")
+                                else:
+                                    # カスタム送信日（時刻は元の投稿時刻を使用）
+                                    send_date = st.date_input("送信日", key=f"date_{post['id']}", min_value=datetime.date.today())
+                                    # 元の投稿時刻を使用
+                                    original_time = original_datetime.time()
+                                    scheduled_datetime = datetime.datetime.combine(send_date, original_time)
+                                    st.info(f"📅 {send_date.strftime('%Y-%m-%d')} {original_time.strftime('%H:%M')} で送信")
+                            
+                            with col_action:
+                                if st.button("📊 Sheets送信", key=f"send_sheets_{post['id']}", type="primary", use_container_width=True):
+                                    
+                                    # Google Sheetsに送信
+                                    success, message = send_to_google_sheets(post['content'], scheduled_datetime)
+                                    
+                                    if success:
+                                        # 送信成功時のデータベース更新
+                                        sent_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", (sent_at, post['id']))
+                                        execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
+                                                    (post['id'], 'google_sheets', sent_at, scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
+                                        st.session_state.page_status_message = ("success", f"Google Sheetsに送信しました！")
+                                    else:
+                                        # 送信失敗時のログ記録
+                                        failed_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
+                                                    (post['id'], 'google_sheets', failed_at, scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
+                                        st.session_state.page_status_message = ("error", message)
+                                    st.rerun()
+                                
+                                if st.button("↩️ 投稿案に戻す", key=f"revert_{post['id']}", use_container_width=True):
+                                    execute_query("UPDATE posts SET status = 'draft', posted_at = NULL WHERE id = ?", (post['id'],))
+                                    st.session_state.page_status_message = ("success", "投稿を「投稿案」に戻しました。"); st.rerun()
+                            
+                            st.markdown("---")
                 else: st.info("承認済みの投稿はまだありません。")
 
             with tab3:
+                # 送信済みタブ
+                sent_posts = execute_query("SELECT p.*, sh.destination, sh.sent_at as send_timestamp, sh.scheduled_datetime FROM posts p LEFT JOIN send_history sh ON p.id = sh.post_id WHERE p.cast_id = ? AND p.sent_status = 'sent' ORDER BY sh.sent_at DESC", (selected_cast_id,), fetch="all")
+                if sent_posts:
+                    st.info(f"{len(sent_posts)}件の送信済み投稿があります。")
+                    for post in sent_posts:
+                        with st.container():
+                            col_content, col_info = st.columns([3,1])
+                            with col_content:
+                                st.caption(f"送信先: {post['destination']} | 送信日時: {post['send_timestamp']} | 予定日時: {post['scheduled_datetime']}")
+                                st.info(post['content'], icon="📤")
+                            with col_info:
+                                st.write(f"**評価**: {post['evaluation']}")
+                                st.write(f"**投稿時間**: {post['posted_at']}")
+                            st.markdown("---")
+                else: 
+                    st.info("送信済みの投稿はまだありません。")
+
+            with tab4:
                 rejected_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'rejected' ORDER BY created_at DESC", (selected_cast_id,), fetch="all")
                 if rejected_posts:
                     st.info(f"{len(rejected_posts)}件の投稿が却下されています。")
@@ -438,11 +730,19 @@ def main():
 
     elif page == "一斉指示":
         st.title("📣 一斉指示（キャンペーン）")
-        casts = execute_query("SELECT id, name FROM casts ORDER BY name", fetch="all")
+        casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
         if not casts:
             st.warning("キャスト未登録です。「キャスト管理」で作成してください。"); st.stop()
-        cast_options = {cast['name']: cast['id'] for cast in casts}
-        selected_cast_names = st.multiselect("対象キャストを選択（複数可）", list(cast_options.keys()), default=list(cast_options.keys()))
+        
+        # キャスト表示名を「name（nickname）」形式で作成
+        cast_options = {}
+        cast_display_options = []
+        for cast in casts:
+            display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+            cast_options[display_name] = cast['id']
+            cast_display_options.append(display_name)
+        
+        selected_cast_names = st.multiselect("対象キャストを選択（複数可）", cast_display_options, default=cast_display_options)
         st.markdown("---")
         with st.form(key="campaign_form"):
             st.subheader("指示内容")
@@ -494,7 +794,7 @@ def main():
             del st.session_state.cast_import_message
         
         # フィールド管理タブを追加
-        individual_tab, csv_tab, field_tab = st.tabs(["� 個別管理", "📊 CSV管理", "� フィールド管理"])
+        individual_tab, csv_tab, field_tab, ai_gen_tab = st.tabs(["👤 個別管理", "📊 CSV管理", "⚙️ フィールド管理", "🤖 AI自動生成"])
         
         with field_tab:
             st.header("キャスト項目の管理")
@@ -543,7 +843,7 @@ def main():
             # デフォルトフィールド
             st.markdown("### 🔒 標準項目（削除不可）")
             default_field_names = {
-                "name": "名前", "nickname": "ニックネーム", "age": "年齢", "birthday": "誕生日",
+                "name": "ユーザー名 (@username)", "nickname": "名前 (表示名)", "age": "年齢", "birthday": "誕生日",
                 "birthplace": "出身地", "appearance": "外見", "personality": "性格", "strength": "長所",
                 "weakness": "短所", "first_person": "一人称", "speech_style": "口調", "catchphrase": "口癖",
                 "customer_interaction": "接客スタイル", "occupation": "職業", "hobby": "趣味", "likes": "好きなもの",
@@ -591,12 +891,12 @@ def main():
                             
                             # まず1行目（列名）を読み取る
                             uploaded_file.seek(0)  # ファイルポインタをリセット
-                            header_df = pd.read_csv(uploaded_file, nrows=1, dtype=str)
+                            header_df = pandas_lib.read_csv(uploaded_file, nrows=1, dtype=str)
                             column_names = header_df.columns.tolist()
                             
                             # 3行目からデータを読み込み（skiprows=2で1行目と2行目をスキップ、1行目の列名を使用）
                             uploaded_file.seek(0)  # ファイルポインタをリセット
-                            df = pd.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
+                            df = pandas_lib.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
                             
                             if 'id' in df.columns:
                                 df = df.drop(columns=['id'])
@@ -659,7 +959,8 @@ def main():
                 with c2:
                     all_casts_data = execute_query("SELECT * FROM casts", fetch="all")
                     if all_casts_data:
-                        df = pd.DataFrame([dict(row) for row in all_casts_data]); csv = df.to_csv(index=False).encode('utf-8')
+                        df = pandas_lib.DataFrame([dict(row) for row in all_casts_data])
+                        csv = df.to_csv(index=False).encode('utf-8')
                         st.download_button("既存キャストをCSVでエクスポート", data=csv, file_name='casts_export.csv', mime='text/csv', use_container_width=True)
         
         with individual_tab:
@@ -683,7 +984,7 @@ def main():
                     form_tabs = st.tabs(tab_names)
                     with form_tabs[0]:
                         c1, c2 = st.columns(2)
-                        new_name = c1.text_input("名前*", placeholder="星野 詩織"); new_nickname = c2.text_input("ニックネーム", placeholder="しおりん")
+                        new_name = c1.text_input("ユーザー名*", placeholder="@shiori_hoshino"); new_nickname = c2.text_input("名前（表示名）", placeholder="星野 詩織")
                         new_age = c1.text_input("年齢", placeholder="21歳"); new_birthday = c2.text_input("誕生日", placeholder="10月26日")
                         new_birthplace = c1.text_input("出身地", placeholder="神奈川県"); new_appearance = st.text_area("外見の特徴", placeholder="黒髪ロングで物静かな雰囲気...")
                     with form_tabs[1]:
@@ -742,12 +1043,20 @@ def main():
                         else: st.error("キャスト名は必須項目です。")
 
         with tab_edit:
-            casts = execute_query("SELECT id, name FROM casts ORDER BY name", fetch="all")
+            casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
             if not casts:
                  st.info("編集できるキャストがまだいません。")
             else:
-                cast_names = [cast['name'] for cast in casts]
-                selected_cast_name_edit = st.selectbox("編集するキャストを選択", cast_names, key="edit_cast_select")
+                # キャスト表示名を「name（nickname）」形式で作成
+                cast_display_options = []
+                cast_name_mapping = {}
+                for cast in casts:
+                    display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+                    cast_display_options.append(display_name)
+                    cast_name_mapping[display_name] = cast['name']
+                
+                selected_cast_display_edit = st.selectbox("編集するキャストを選択", cast_display_options, key="edit_cast_select")
+                selected_cast_name_edit = cast_name_mapping[selected_cast_display_edit]
                 if selected_cast_name_edit:
                     cast_id_to_edit = next((c['id'] for c in casts if c['name'] == selected_cast_name_edit), None)
                     cast_data_to_edit_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (cast_id_to_edit,), fetch="one")
@@ -761,8 +1070,8 @@ def main():
                             t1, t2, t3, t4, t5 = edit_tabs[:5]
                             with t1:
                                 c1, c2 = st.columns(2)
-                                edit_name = c1.text_input("名前*", value=cast_data_to_edit.get('name', ''))
-                                edit_nickname = c2.text_input("ニックネーム", value=cast_data_to_edit.get('nickname', '')); edit_age = c1.text_input("年齢", value=cast_data_to_edit.get('age', ''))
+                                edit_name = c1.text_input("ユーザー名*", value=cast_data_to_edit.get('name', ''))
+                                edit_nickname = c2.text_input("名前（表示名）", value=cast_data_to_edit.get('nickname', '')); edit_age = c1.text_input("年齢", value=cast_data_to_edit.get('age', ''))
                                 edit_appearance = st.text_area("外見の特徴", value=cast_data_to_edit.get('appearance', '')); edit_birthday = c1.text_input("誕生日", value=cast_data_to_edit.get('birthday', ''))
                                 edit_birthplace = c2.text_input("出身地", value=cast_data_to_edit.get('birthplace', ''))
                             with t2:
@@ -846,7 +1155,8 @@ def main():
             if all_casts:
                 st.info(f"登録済みキャスト数: {len(all_casts)}件")
                 for cast in all_casts:
-                    with st.expander(f"👤 {cast['name']}", expanded=False):
+                    display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+                    with st.expander(f"👤 {display_name}", expanded=False):
                         cast_dict = dict(cast)
                         col1, col2 = st.columns(2)
                         
@@ -889,6 +1199,245 @@ def main():
                                     st.write(f"• {field['display_name']}: {field_value}")
             else:
                 st.info("登録済みのキャストはまだありません。")
+        
+        with ai_gen_tab:
+            st.header("🤖 AIキャスト自動生成")
+            st.markdown("AIを使って複数のキャストプロフィールを自動生成し、一括でCSV登録できます。")
+            
+            # 成功メッセージの表示
+            if "ai_gen_message" in st.session_state:
+                msg_type, msg_content = st.session_state.ai_gen_message
+                if msg_type == "success":
+                    st.success(msg_content)
+                elif msg_type == "warning":
+                    st.warning(msg_content)
+                elif msg_type == "error":
+                    st.error(msg_content)
+                del st.session_state.ai_gen_message
+            
+            with st.form("ai_cast_generation"):
+                st.subheader("🎯 生成設定")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    gen_count = st.number_input("生成するキャスト数", min_value=1, max_value=20, value=5)
+                    gen_instruction = st.text_area(
+                        "簡単な指示文（任意）", 
+                        placeholder="例：アニメ風の可愛いキャラクター、ファンタジー世界の住人、現代の学生など",
+                        height=100
+                    )
+                
+                with col2:
+                    st.subheader("🔧 事前登録項目")
+                    gen_names = st.text_area(
+                        "ユーザー名,名前 のペアリスト（必須）\n※1行に1ペアずつ入力",
+                        placeholder="例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜",
+                        height=100
+                    )
+                    gen_gender_ratio = st.selectbox(
+                        "性別比率",
+                        ["ランダム", "全て女性", "全て男性", "女性多め", "男性多め"]
+                    )
+                
+                # 許可カテゴリの選択
+                st.subheader("📚 許可するシチュエーションカテゴリ")
+                cat_rows = execute_query("SELECT name FROM situation_categories ORDER BY name", fetch="all")
+                category_options = [row['name'] for row in cat_rows] if cat_rows else []
+                
+                if category_options:
+                    gen_categories = st.multiselect(
+                        "生成されたキャストに許可するカテゴリ（複数選択可）",
+                        category_options,
+                        default=category_options[:3]  # 最初の3つをデフォルト選択
+                    )
+                else:
+                    st.warning("カテゴリが登録されていません。「カテゴリ管理」で先にカテゴリを作成してください。")
+                    gen_categories = []
+                
+                # 所属グループの選択
+                group_rows = execute_query("SELECT id, name FROM groups ORDER BY name", fetch="all")
+                group_options = {row['name']: row['id'] for row in group_rows} if group_rows else {}
+                
+                if group_options:
+                    gen_groups = st.multiselect(
+                        "所属グループ（任意）",
+                        list(group_options.keys())
+                    )
+                else:
+                    gen_groups = []
+                
+                generate_button = st.form_submit_button("🚀 キャストを自動生成", type="primary")
+            
+            # フォーム外での生成処理
+            if generate_button:
+                    if not gen_names.strip():
+                        st.error("ユーザー名,名前のペアリストは必須です。1行に1ペアずつ入力してください。")
+                    elif not gen_categories:
+                        st.error("最低1つのカテゴリを選択してください。")
+                    elif not st.session_state.get('gemini_model'):
+                        st.error("AIモデルが利用できません。")
+                    else:
+                        # ユーザー名,名前ペアリストを処理
+                        name_pairs = []
+                        for line in gen_names.strip().split('\n'):
+                            line = line.strip()
+                            if line and ',' in line:
+                                username, display_name = [part.strip() for part in line.split(',', 1)]
+                                if username and display_name:
+                                    name_pairs.append((username, display_name))
+                        
+                        actual_count = min(gen_count, len(name_pairs))
+                        
+                        if actual_count == 0:
+                            st.error("有効なユーザー名,名前のペアが入力されていません。正しい形式：@username,表示名")
+                        else:
+                            # 性別比率の設定
+                            gender_weights = {
+                                "ランダム": {"女性": 0.5, "男性": 0.5},
+                                "全て女性": {"女性": 1.0, "男性": 0.0},
+                                "全て男性": {"女性": 0.0, "男性": 1.0},
+                                "女性多め": {"女性": 0.7, "男性": 0.3},
+                                "男性多め": {"女性": 0.3, "男性": 0.7}
+                            }
+                            
+                            generated_casts = []
+                            progress_bar = st.progress(0, text="AIキャストを生成中...")
+                            
+                            for i in range(actual_count):
+                                progress_bar.progress((i + 1) / actual_count, text=f"キャスト {i+1}/{actual_count} を生成中...")
+                                
+                                username, display_name = name_pairs[i]
+                                
+                                # 性別を決定
+                                weights = gender_weights[gen_gender_ratio]
+                                gender = random.choices(["女性", "男性"], weights=[weights["女性"], weights["男性"]])[0]
+                                
+                                # AIプロンプトを作成
+                                base_instruction = gen_instruction if gen_instruction.strip() else "魅力的で個性豊かなキャラクター"
+                                
+                                prompt = f"""以下の指示に従って、キャラクターのプロフィールを生成してください。
+
+# 基本設定
+- ユーザー名: {username}
+- 名前（表示名）: {display_name}
+- 性別: {gender}
+- 追加指示: {base_instruction}
+
+# 出力形式
+以下の項目を必ず含めて、自然で魅力的なキャラクタープロフィールを作成してください：
+
+**基本情報**
+- 年齢: （具体的な年齢）
+- 誕生日: （月日）
+- 出身地: （都道府県）
+- 外見の特徴: （髪型、服装、特徴的な部分など）
+
+**性格・話し方**
+- 性格: （一言で表現）
+- 長所: （魅力的な点）
+- 短所: （親しみやすい欠点）
+- 一人称: （私、僕、俺など）
+- 口調・語尾: （話し方の特徴）
+- 口癖: （「」で囲んで）
+- お客様への接し方: （接客スタイル）
+
+**背景ストーリー**
+- 職業／学業: （現在の所属）
+- 趣味や特技: （興味のあること）
+- 好きなもの: （具体的に）
+- 嫌いなもの: （具体的に）
+- 休日の過ごし方: （日常の様子）
+- 将来の夢: （目標や憧れ）
+- なぜこの仕事をしているのか: （動機）
+- ちょっとした秘密: （親しみやすい秘密）
+
+# ルール
+- 各項目は簡潔で具体的に
+- キャラクターに一貫性を持たせる
+- 親しみやすく魅力的な設定にする
+- 性別に合った自然な設定にする"""
+
+                                try:
+                                    response = st.session_state.gemini_model.generate_content(prompt)
+                                    ai_profile = response.text
+                                    
+                                    # AI出力を解析してフィールドに分割
+                                    cast_data = parse_ai_profile(ai_profile, display_name, username, gen_categories)
+                                    generated_casts.append(cast_data)
+                                    
+                                    time.sleep(2)  # API制限を考慮
+                                    
+                                except Exception as e:
+                                    st.warning(f"キャスト「{display_name}（{username}）」の生成中にエラーが発生しました: {e}")
+                                    continue
+                            
+                            if generated_casts:
+                                # CSV形式でダウンロード用データを作成
+                                df = pandas_lib.DataFrame(generated_casts)
+                                csv_data = df.to_csv(index=False).encode('utf-8')
+                                
+                                # セッション状態に保存
+                                st.session_state.generated_casts_data = csv_data
+                                st.session_state.generated_casts_list = generated_casts
+                                st.session_state.ai_gen_message = ("success", f"{len(generated_casts)}件のキャストプロフィールを生成しました！")
+                            else:
+                                st.session_state.ai_gen_message = ("error", "キャストの生成に失敗しました。")
+                            
+                            st.rerun()
+            
+            # 生成完了後のダウンロードボタン表示（フォーム外）
+            if 'generated_casts_data' in st.session_state:
+                st.subheader("🎉 生成完了")
+                st.info(f"{len(st.session_state.generated_casts_list)}件のキャストが生成されました。以下からCSVをダウンロードして、「CSV管理」タブからインポートしてください。")
+                
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.download_button(
+                        "📥 生成されたキャストをCSVでダウンロード",
+                        data=st.session_state.generated_casts_data,
+                        file_name=f'ai_generated_casts_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+                        mime='text/csv',
+                        use_container_width=True
+                    )
+                with col2:
+                    if st.button("🗑️ 生成結果をクリア", use_container_width=True):
+                        if 'generated_casts_data' in st.session_state:
+                            del st.session_state.generated_casts_data
+                        if 'generated_casts_list' in st.session_state:
+                            del st.session_state.generated_casts_list
+                        st.rerun()
+                
+                # プレビュー表示
+                with st.expander("生成されたキャストのプレビュー", expanded=True):
+                    for i, cast in enumerate(st.session_state.generated_casts_list[:3]):  # 最初の3件のみ表示
+                        st.write(f"**{i+1}. {cast['name']}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• ニックネーム: {cast.get('nickname', '')}")
+                            st.write(f"• 年齢: {cast.get('age', '')}")
+                            st.write(f"• 性格: {cast.get('personality', '')}")
+                        with col2:
+                            st.write(f"• 職業: {cast.get('occupation', '')}")
+                            st.write(f"• 趣味: {cast.get('hobby', '')}")
+                            st.write(f"• 口癖: {cast.get('catchphrase', '')}")
+                        if i < len(st.session_state.generated_casts_list) - 1:
+                            st.markdown("---")
+                    
+                    if len(st.session_state.generated_casts_list) > 3:
+                        st.info(f"他 {len(st.session_state.generated_casts_list) - 3} 件のキャストも生成されました。CSVファイルで全て確認できます。")
+            
+            st.markdown("---")
+            st.subheader("💡 使い方")
+            st.markdown("""
+            1. **生成設定**：作りたいキャスト数と簡単な指示を入力
+            2. **基本情報**：名前リストと性別比率を設定
+            3. **カテゴリ選択**：生成されたキャストが使用できるシチュエーションを選択
+            4. **自動生成**：AIが各キャストの詳細プロフィールを生成
+            5. **CSV保存**：生成結果をCSVでダウンロード
+            6. **一括登録**：「CSV管理」タブからインポートして一括登録
+            7. **チューニング**：「個別管理」タブで各キャストを編集・調整
+            """)
 
     elif page == "グループ管理":
         st.title("🏢 グループ管理"); st.markdown("キャストに共通のプロフィール（職場や所属など）を設定します。")
@@ -1012,7 +1561,7 @@ def main():
                             st.text(f"{i}行目: {line}")
                     else:
                         # 正しい形式で読み込み：1行目をヘッダーとして使用し、2行目をスキップ
-                        df = pd.read_csv(uploaded_file, skiprows=[1], dtype=str).fillna("")
+                        df = pandas_lib.read_csv(uploaded_file, skiprows=[1], dtype=str).fillna("")
                         
                         # 必要な列の存在チェック
                         required_columns = ['content', 'time_slot', 'category']
@@ -1083,7 +1632,7 @@ def main():
             
             all_sits_for_export = execute_query("SELECT s.content, s.time_slot, sc.name as category FROM situations s LEFT JOIN situation_categories sc ON s.category_id = sc.id", fetch="all")
             if all_sits_for_export:
-                df = pd.DataFrame([dict(r) for r in all_sits_for_export])
+                df = pandas_lib.DataFrame([dict(r) for r in all_sits_for_export])
                 c2.download_button("CSVエクスポート", df.to_csv(index=False).encode('utf-8'), "situations.csv", "text/csv", use_container_width=True)
         st.markdown("---")
         st.header("個別管理")
@@ -1153,12 +1702,12 @@ def main():
                 try:
                     # まず1行目（列名）を読み取る
                     uploaded_file.seek(0)  # ファイルポインタをリセット
-                    header_df = pd.read_csv(uploaded_file, nrows=1, dtype=str)
+                    header_df = pandas_lib.read_csv(uploaded_file, nrows=1, dtype=str)
                     column_names = header_df.columns.tolist()
                     
                     # 3行目からデータを読み込み（skiprows=2で1行目と2行目をスキップ、1行目の列名を使用）
                     uploaded_file.seek(0)  # ファイルポインタをリセット
-                    df = pd.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
+                    df = pandas_lib.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
                     
                     # content列の存在確認
                     if 'content' not in df.columns:
@@ -1194,7 +1743,7 @@ def main():
                     
             all_advs = execute_query("SELECT content FROM advice_master", fetch="all")
             if all_advs:
-                df = pd.DataFrame([dict(r) for r in all_advs])
+                df = pandas_lib.DataFrame([dict(r) for r in all_advs])
                 c2.download_button("CSVエクスポート", df.to_csv(index=False).encode('utf-8'), "advice.csv", "text/csv", use_container_width=True)
         st.markdown("---")
         st.header("個別管理")
@@ -1234,6 +1783,91 @@ def main():
                                 st.rerun()
         else: 
             st.info("登録済みのアドバイスはありません。")
+    
+    elif page == "システム設定":
+        st.title("⚙️ システム設定")
+        st.markdown("アプリケーションの各種設定を管理します。")
+        
+        st.subheader("🗃️ Google Sheets 連携設定")
+        st.markdown("Google Sheets APIを使用して投稿を送信するための認証設定を行います。")
+        
+        with st.expander("OAuth認証情報の設定", expanded=True):
+            st.markdown("""
+            **設定手順:**
+            1. [Google Cloud Console](https://console.cloud.google.com/)でOAuth 2.0クライアントIDを作成
+            2. クライアントタイプは「デスクトップアプリケーション」を選択
+            3. 作成したクライアントIDのJSONファイルをダウンロード
+            4. 下記のテキストエリアにJSONの内容を貼り付けて保存
+            """)
+            
+            # 現在の認証情報の状態確認
+            credentials_path = "credentials/credentials.json"
+            if os.path.exists(credentials_path):
+                st.success("✅ OAuth認証情報が設定済みです")
+                if st.button("認証情報を削除"):
+                    try:
+                        os.remove(credentials_path)
+                        # トークンファイルも削除
+                        token_path = "credentials/token.pickle"
+                        if os.path.exists(token_path):
+                            os.remove(token_path)
+                        st.success("認証情報を削除しました。ページを更新してください。")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"認証情報の削除中にエラーが発生しました: {e}")
+            else:
+                st.warning("⚠️ OAuth認証情報が設定されていません")
+                
+                # JSON入力フォーム
+                with st.form("oauth_credentials_form"):
+                    st.markdown("**OAuth認証情報JSON:**")
+                    json_content = st.text_area(
+                        "GoogleクライアントIDのJSONファイルの内容を貼り付けてください",
+                        height=200,
+                        placeholder='{\n  "installed": {\n    "client_id": "...",\n    "client_secret": "...",\n    ...\n  }\n}'
+                    )
+                    
+                    submit_btn = st.form_submit_button("認証情報を保存", type="primary")
+                    
+                    if submit_btn:
+                        if json_content.strip():
+                            try:
+                                # JSONの妥当性をチェック
+                                import json
+                                credentials_data = json.loads(json_content)
+                                
+                                # 必要なフィールドの存在確認
+                                if "installed" in credentials_data:
+                                    required_fields = ["client_id", "client_secret", "auth_uri", "token_uri"]
+                                    missing_fields = []
+                                    for field in required_fields:
+                                        if field not in credentials_data["installed"]:
+                                            missing_fields.append(field)
+                                    
+                                    if missing_fields:
+                                        st.error(f"必要なフィールドが不足しています: {', '.join(missing_fields)}")
+                                    else:
+                                        # credentialsディレクトリが存在しない場合は作成
+                                        os.makedirs("credentials", exist_ok=True)
+                                        
+                                        # JSONファイルを保存
+                                        with open(credentials_path, 'w', encoding='utf-8') as f:
+                                            json.dump(credentials_data, f, indent=2, ensure_ascii=False)
+                                        
+                                        st.success("✅ OAuth認証情報を保存しました！ページを更新してください。")
+                                        st.rerun()
+                                else:
+                                    st.error("無効なJSONフォーマットです。'installed'フィールドが見つかりません。")
+                                    
+                            except json.JSONDecodeError as e:
+                                st.error(f"JSONの解析に失敗しました: {e}")
+                            except Exception as e:
+                                st.error(f"認証情報の保存中にエラーが発生しました: {e}")
+                        else:
+                            st.warning("JSON内容を入力してください。")
+        
+        st.subheader("🔧 その他の設定")
+        st.markdown("今後、その他のシステム設定項目がここに追加される予定です。")
 
 if __name__ == "__main__":
     main()

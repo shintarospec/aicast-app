@@ -1,2 +1,28 @@
 venv/
 casting_office.db
+
+# 認証情報（セキュリティ上の理由で除外）
+credentials/credentials.json
+credentials/token.pickle
+
+# ログファイル
+*.log
+app.log
+
+# 一時ファイル
+.DS_Store
+Thumbs.db
+
+# Python関連
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# 環境変数ファイル
+.env
+.env.local
+
+# Streamlit設定
+.streamlit/secrets.toml
