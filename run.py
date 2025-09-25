@@ -34,7 +34,7 @@ def main():
         subprocess.run([
             sys.executable, "-m", "streamlit", "run", "app.py",
             "--server.address=0.0.0.0",
-            "--server.port=8501",
+            "--server.port=8502",
             "--server.headless=true"
         ], check=True)
     except subprocess.CalledProcessError as e:

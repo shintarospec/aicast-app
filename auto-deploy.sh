@@ -71,5 +71,5 @@ else
 fi
 
 echo ""
-echo "🌐 アプリURL: http://153.126.194.114:8501"
+echo "🌐 アプリURL: http://153.126.194.114:8502"
 echo "🔗 GitHub Actions: https://github.com/shintarospec/aicast-app/actions"
