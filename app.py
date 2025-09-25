@@ -240,8 +240,8 @@ def setup_google_sheets_oauth():
     except Exception as e:
         return None, f"OAuth認証エラー: {str(e)}"
 
-def send_to_google_sheets(post_content, scheduled_datetime):
-    """Google Sheetsにデータを送信する"""
+def send_to_google_sheets(cast_name, post_content, scheduled_datetime):
+    """Google Sheetsにデータを送信する（キャスト名付き）"""
     try:
         os.makedirs("credentials", exist_ok=True)
         credentials_path = "credentials/credentials.json"
@@ -280,11 +280,11 @@ def send_to_google_sheets(post_content, scheduled_datetime):
             spreadsheet = client.create("aicast_post")
             sheet = spreadsheet.sheet1
             # ヘッダー行を追加
-            sheet.append_row(["datetime", "content"])
+            sheet.append_row(["datetime", "cast_name", "content"])
         
-        # データを追加
+        # データを追加（キャスト名も含める）
         formatted_datetime = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([formatted_datetime, post_content])
+        sheet.append_row([formatted_datetime, cast_name, post_content])
         
         return True, "Google Sheetsに送信しました。"
         
@@ -672,8 +672,11 @@ def main():
                             with col_action:
                                 if st.button("📊 Sheets送信", key=f"send_sheets_{post['id']}", type="primary", use_container_width=True):
                                     
-                                    # Google Sheetsに送信
-                                    success, message = send_to_google_sheets(post['content'], scheduled_datetime)
+                                    # Google Sheetsに送信（キャスト名付き）
+                                    # 現在選択中のキャスト名を取得
+                                    current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
+                                    display_cast_name = f"{current_cast['name']}（{current_cast['nickname']}）" if current_cast and current_cast['nickname'] else selected_cast_name
+                                    success, message = send_to_google_sheets(display_cast_name, post['content'], scheduled_datetime)
                                     
                                     if success:
                                         # 送信成功時のデータベース更新
