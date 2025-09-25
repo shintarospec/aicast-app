@@ -1,33 +1,27 @@
 name: 本番環境自動デプロイ
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:  # 手動実行も可能
+  workflow_dispatch:  # 手動実行のみ
+    inputs:
+      message:
+        description: 'デプロイメッセージ'
+        required: false
+        default: '本番デプロイ実行'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 🚀 本番環境デプロイ
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.SSH_KEY }}
-        script: |
-          cd /home/shintaro/aicast-app
-          git pull origin main
-          
-          # 既存プロセスの停止
-          if screen -list | grep -q "aicast"; then
-            screen -S aicast -X quit
-            sleep 3
-          fi
-          
-          # 新プロセスの起動
-          screen -dmS aicast bash -c 'cd /home/shintaro/aicast-app && python3 run.py'
-          
-          echo "✅ デプロイ完了！"
-          screen -list
+    - name: 🚀 本番環境デプロイ通知
+      run: |
+        echo "🎯 デプロイ対象: AIcast Room"
+        echo "📝 メッセージ: ${{ github.event.inputs.message }}"
+        echo "⏰ 実行時刻: $(date)"
+        echo ""
+        echo "📋 本番環境で以下のコマンドを実行してください:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "cd /home/shintaro/aicast-app"  
+        echo "git pull origin main"
+        echo "screen -S aicast -X quit; sleep 2; screen -dmS aicast bash -c 'python3 run.py'"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
