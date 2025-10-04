@@ -1,0 +1,33 @@
+# さくらVPS運用向け systemd サービス設定
+
+[Unit]
+Description=AIcast Room Application
+After=network.target
+
+[Service]
+Type=simple
+User=codespace
+Group=codespace
+WorkingDirectory=/workspaces/aicast-app
+Environment=PATH=/home/codespace/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/workspaces/aicast-app
+Environment=GOOGLE_APPLICATION_CREDENTIALS=/home/codespace/.config/gcloud/application_default_credentials.json
+ExecStart=/usr/bin/python3 run.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/aicast/app.log
+StandardError=append:/var/log/aicast/error.log
+
+# リソース制限
+MemoryLimit=1G
+CPUQuota=80%
+
+# セキュリティ設定
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/workspaces/aicast-app
+
+[Install]
+WantedBy=multi-user.target
