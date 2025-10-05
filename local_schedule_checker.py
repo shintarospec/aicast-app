@@ -14,8 +14,18 @@ import os
 import subprocess
 import pytz
 
+# 🔐 Security Feature Configuration
+USE_SECRET_MANAGER = False  # Set to True to enable Secret Manager security features
+                           # Currently disabled for development compatibility
+                           # Future enhancement: Set to True for production security
+
 def create_secret_manager_entry(account_id, db_path):
-    """データベースからX API認証情報を取得してSecret Managerに自動設定"""
+    """データベースからX API認証情報を取得してSecret Managerに自動設定
+    
+    🔐 セキュリティ機能: Secret Manager統合
+    - 将来の機能拡張のためコードを保持
+    - USE_SECRET_MANAGER = True で有効化可能
+    """
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -83,52 +93,57 @@ def sanitize_content_for_x_api(content):
     return content
 
 def get_account_id_for_cast(cast_name, db_path):
-    """キャスト名からX APIアカウントIDを取得"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    """キャスト名からX APIアカウントIDを取得
     
+    🔐 セキュリティ設定:
+    - USE_SECRET_MANAGER = False: データベース直接取得（開発環境向け）
+    - USE_SECRET_MANAGER = True:  Secret Manager統合（本番環境向け）
+    """
     try:
-        # cast_x_credentialsテーブルからキャスト名に対応するtwitter_usernameを取得
-        cursor.execute("""
-            SELECT cxc.twitter_username FROM cast_x_credentials cxc
-            JOIN casts c ON cxc.cast_id = c.id
-            WHERE c.name = ? AND cxc.is_active = 1
-        """, (cast_name,))
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
         
+        cursor.execute("""
+            SELECT cxc.twitter_username 
+            FROM cast_x_credentials cxc
+            JOIN casts c ON c.id = cxc.cast_id
+            WHERE c.name = ?
+        """, (cast_name,))
         result = cursor.fetchone()
+        
         if result:
             account_id = result[0]
             
-            # Secret Managerの存在確認
-            secret_name = f"x-api-{account_id}"
-            check_result = subprocess.run([
-                'gcloud', 'secrets', 'describe', secret_name
-            ], capture_output=True, text=True)
-            
-            if check_result.returncode != 0:
-                print(f"⚠️  Secret Manager未設定: {secret_name}")
-                print(f"🔧 自動設定を実行中...")
+            # 🔐 Secret Manager統合機能（将来の機能拡張用）
+            if USE_SECRET_MANAGER:
+                # Secret Managerの存在確認
+                secret_name = f"x-api-{account_id}"
+                check_result = subprocess.run([
+                    'gcloud', 'secrets', 'describe', secret_name
+                ], capture_output=True, text=True)
                 
-                if create_secret_manager_entry(account_id, db_path):
-                    print(f"✅ {account_id} の自動設定完了")
-                else:
-                    print(f"❌ {account_id} の自動設定失敗 - 投稿をスキップします")
-                    print(f"⚠️  各キャストは専用アカウントでのみ投稿可能です")
-                    return None  # フォールバック禁止
+                if check_result.returncode != 0:
+                    print(f"⚠️  Secret Manager未設定: {secret_name}")
+                    print(f"🔧 自動設定を実行中...")
+                    
+                    if create_secret_manager_entry(account_id, db_path):
+                        print(f"✅ {account_id} の自動設定完了")
+                    else:
+                        print(f"❌ {account_id} の自動設定失敗 - 投稿をスキップします")
+                        print(f"⚠️  各キャストは専用アカウントでのみ投稿可能です")
+                        return None  # フォールバック禁止
             
             return account_id
         else:
-            # マッピングが見つからない場合は投稿をスキップ
-            print(f"❌ キャスト '{cast_name}' のX API認証情報が見つかりません")
-            print(f"⚠️  各キャストは専用アカウントでのみ投稿可能です - 投稿をスキップします")
-            return None  # フォールバック禁止
+            print(f"⚠️ {cast_name} のX API認証情報が見つかりません")
+            return None
             
-    except Exception as e:
-        print(f"❌ X API認証情報の取得エラー: {e}")
-        print(f"⚠️  エラーのため投稿をスキップします")
-        return None  # フォールバック禁止
+    except sqlite3.Error as e:
+        print(f"❌ データベースエラー: {e}")
+        return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def get_scheduled_posts(db_path):
     """実行予定時刻に達した投稿を取得"""

@@ -400,3 +400,10 @@ access_token_secret TEXT -- Access Token Secret
 
 *最終更新: 2025年10月3日*
 *ドキュメントバージョン: 1.0*
+---
+
+## 📝 修正履歴（2025年10月5日）
+### Secret Manager無効化対応
+- USE_SECRET_MANAGERフラグ追加でSecret Manager機能を無効化
+- データベース直接取得方式に変更（リツイート予約と同一）
+- セキュリティ拡張性を保持しつつ、開発・GUIテストに対応
