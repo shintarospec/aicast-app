@@ -4,6 +4,8 @@ casting_office.db
 # 認証情報（セキュリティ上の理由で除外）
 credentials/credentials.json
 credentials/token.pickle
+credentials/google_drive_credentials.json
+credentials/google_drive_token.pickle
 
 # ログファイル
 *.log

@@ -18,6 +18,16 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pickle
 
+# 🔐 認証システムのインポート
+from auth_system import check_password, show_auth_status
+
+# 🔐 認証チェック（アプリの最初に実行）
+if not check_password():
+    st.stop()
+
+# 🔐 認証状態表示
+show_auth_status()
+
 from config import Config
 
 # X API投稿機能
