@@ -58,7 +58,11 @@ def clear_auth_params():
         del st.query_params['page']
 
 def save_current_page(page_name):
-    """現在のページを保存（URLパラメータで）"""
+    """現在のページを保存（URLパラメータ + セッション状態の二重保存）"""
+    # セッション状態にも保存（フォールバック用）
+    st.session_state.current_page = page_name
+    
+    # URLパラメータにも保存
     auth_token, _ = get_auth_params()
     if auth_token:
         print(f"[DEBUG] Saving page: {page_name} with token: {auth_token[:20]}...")
@@ -67,10 +71,25 @@ def save_current_page(page_name):
         print(f"[DEBUG] No auth token found, cannot save page: {page_name}")
 
 def get_current_page():
-    """保存されたページを取得"""
-    _, page = get_auth_params()
-    print(f"[DEBUG] Retrieved page: {page}")
-    return page if page else 'dashboard'
+    """保存されたページを取得（URLパラメータ優先、セッション状態をフォールバック）"""
+    # まずURLパラメータから取得を試行
+    _, page_from_url = get_auth_params()
+    
+    # セッション状態からも取得
+    page_from_session = st.session_state.get('current_page', 'dashboard')
+    
+    # URLパラメータがある場合はそれを優先、なければセッション状態を使用
+    if page_from_url and page_from_url != 'dashboard':
+        final_page = page_from_url
+        print(f"[DEBUG] Retrieved page from URL: {final_page}")
+    elif page_from_session and page_from_session != 'dashboard':
+        final_page = page_from_session
+        print(f"[DEBUG] Retrieved page from session (fallback): {final_page}")
+    else:
+        final_page = 'dashboard'
+        print(f"[DEBUG] Using default page: {final_page}")
+    
+    return final_page
 
 def check_password():
     """シンプル確実認証チェック"""
