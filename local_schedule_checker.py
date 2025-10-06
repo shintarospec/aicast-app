@@ -291,6 +291,9 @@ def execute_real_post(post):
 def update_post_status(db_path, post_id, status, tweet_id=None):
     """投稿ステータスを更新"""
     try:
+        print(f"🔍 update_post_status - DBパス: {db_path}")
+        print(f"🔍 update_post_status - ファイル存在: {os.path.exists(db_path)}")
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -311,8 +314,10 @@ def update_post_status(db_path, post_id, status, tweet_id=None):
         
         conn.commit()
         conn.close()
+        print(f"✅ update_post_status - 投稿ID {post_id} を {status} に更新完了")
         
     except Exception as e:
+        print(f"❌ update_post_status - エラー: {str(e)}")
         raise Exception(f"Failed to update post status: {str(e)}")
 
 def main():
