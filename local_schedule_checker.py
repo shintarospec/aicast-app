@@ -221,7 +221,10 @@ def execute_real_post(post):
         sanitized_content = sanitize_content_for_x_api(post['content'])
         
         # 二重チェック: account_idが正しくマッピングされているか確認
-        expected_account = get_account_id_for_cast(post['cast_name'], '/workspaces/aicast-app/casting_office.db')
+        # 動的パス解決
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(current_dir, 'casting_office.db')
+        expected_account = get_account_id_for_cast(post['cast_name'], db_path)
         if post['x_account_id'] != expected_account:
             print(f"🚨 CRITICAL ERROR: アカウントマッピング不一致!")
             print(f"   キャスト: {post['cast_name']}")
