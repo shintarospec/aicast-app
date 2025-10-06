@@ -148,8 +148,16 @@ def get_account_id_for_cast(cast_name, db_path):
 def get_scheduled_posts(db_path):
     """実行予定時刻に達した投稿を取得"""
     try:
+        print(f"🔍 データベース接続試行: {db_path}")
+        print(f"🔍 ファイル存在確認: {os.path.exists(db_path)}")
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+        
+        # データベース接続テスト
+        cursor.execute("SELECT COUNT(*) FROM posts")
+        post_count = cursor.fetchone()[0]
+        print(f"🔍 posts テーブル件数: {post_count}")
         
         # 日本時間のタイムゾーンを設定
         JST = pytz.timezone('Asia/Tokyo')
@@ -325,7 +333,14 @@ def main():
     
     print()
     
-    db_path = '/workspaces/aicast-app/casting_office.db'
+    # 動的パス解決: 実行ディレクトリからデータベースを探す
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(current_dir, 'casting_office.db')
+    
+    print(f"🔍 デバッグ情報:")
+    print(f"   - スクリプトディレクトリ: {current_dir}")
+    print(f"   - データベースパス: {db_path}")
+    print(f"   - ファイル存在: {os.path.exists(db_path)}")
     
     try:
         # スケジュールされた投稿を検索
@@ -373,6 +388,10 @@ def main():
         
     except Exception as e:
         print(f"❌ 全体エラー: {str(e)}")
+        print(f"❌ エラータイプ: {type(e).__name__}")
+        import traceback
+        print(f"❌ スタックトレース:")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
