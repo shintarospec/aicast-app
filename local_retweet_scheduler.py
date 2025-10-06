@@ -15,7 +15,9 @@ import subprocess
 import pytz
 
 # 設定値
-DB_PATH = 'casting_office.db'
+# 動的パス解決
+current_dir = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(current_dir, 'casting_office.db')
 CLOUD_FUNCTION_URL = Config.get_cloud_functions_url()
 JST = pytz.timezone('Asia/Tokyo')
 
