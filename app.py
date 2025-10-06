@@ -754,6 +754,75 @@ def setup_google_sheets_oauth_simple():
     except Exception as e:
         return None, f"OAuth認証エラー: {str(e)}"
 
+def setup_vertex_ai_oauth_simple():
+    """Vertex AI用OAuth認証（Streamlit Secrets対応）"""
+    try:
+        from google.auth.transport.requests import Request
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        import pickle
+        import json
+        
+        # Vertex AI に必要なスコープ
+        SCOPES = [
+            'https://www.googleapis.com/auth/cloud-platform',
+            'https://www.googleapis.com/auth/cloud-platform.read-only'
+        ]
+        
+        token_path = "credentials/vertex_ai_token.pickle"
+        creds = None
+        
+        # 既存のトークンを確認
+        if os.path.exists(token_path):
+            with open(token_path, 'rb') as token:
+                creds = pickle.load(token)
+                
+                # 辞書形式の場合はCredentialsオブジェクトに変換
+                if isinstance(creds, dict):
+                    from google.oauth2.credentials import Credentials
+                    creds = Credentials(
+                        token=creds.get('access_token'),
+                        refresh_token=creds.get('refresh_token'),
+                        token_uri=creds.get('token_uri'),
+                        client_id=creds.get('client_id'),
+                        client_secret=creds.get('client_secret'),
+                        scopes=creds.get('scopes', SCOPES)
+                    )
+        
+        # 認証が必要な場合
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                # OAuth設定を取得（Streamlit Secrets優先）
+                oauth_config = None
+                
+                if Config.is_production_environment() and "google_oauth" in st.secrets:
+                    # Streamlit Secrets から OAuth設定を取得
+                    oauth_config = dict(st.secrets["google_oauth"])
+                    oauth_config = {"installed": oauth_config}
+                else:
+                    # ローカル環境：ファイルから読み込み
+                    credentials_path = "credentials/client_secret_909115239455-fauih26mvj1g6hksfq9pub4okse90acg.apps.googleusercontent.com.json"
+                    if os.path.exists(credentials_path):
+                        with open(credentials_path, 'r') as f:
+                            oauth_config = json.load(f)
+                
+                if not oauth_config:
+                    return None, "OAuth認証設定が見つかりません"
+                
+                # ブラウザ認証（Google Sheetsと同じパターン）
+                flow = InstalledAppFlow.from_client_config(oauth_config, SCOPES)
+                creds = flow.run_local_server(port=0)
+            
+            # トークンを保存
+            os.makedirs("credentials", exist_ok=True)
+            with open(token_path, 'wb') as token:
+                pickle.dump(creds, token)
+        
+        return creds, "Vertex AI認証成功"
+    except Exception as e:
+        return None, f"Vertex AI OAuth認証エラー: {str(e)}"
+
 def setup_google_sheets_oauth(credentials_path="credentials/credentials.json"):
     """Google Sheets OAuth認証の初期設定（複雑版 - 下位互換用）"""
     # 複雑版のコードは後で削除予定
@@ -1963,8 +2032,19 @@ def main():
                 credentials = service_account.Credentials.from_service_account_info(credentials_info)
                 vertexai.init(project=project_id, location=location, credentials=credentials)
                 st.sidebar.success("🌐 Streamlit Cloud認証完了")
+            elif Config.is_production_environment():
+                # Streamlit Cloud環境でサービスアカウントが使用できない場合、OAuth認証を試行
+                try:
+                    oauth_creds, oauth_message = setup_vertex_ai_oauth_simple()
+                    if oauth_creds:
+                        vertexai.init(project=project_id, location=location, credentials=oauth_creds)
+                        st.sidebar.success("🔐 OAuth認証完了（Vertex AI）")
+                    else:
+                        raise Exception(f"OAuth認証失敗: {oauth_message}")
+                except Exception as oauth_error:
+                    raise Exception(f"OAuth認証も失敗: {oauth_error}")
             else:
-                # Local development or default authentication
+                # Local development or default authentication (変更なし！)
                 vertexai.init(project=project_id, location=location)
                 st.sidebar.success("✅ Googleサービス認証完了")
             st.session_state.auth_done = True
