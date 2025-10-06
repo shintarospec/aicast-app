@@ -53,6 +53,111 @@
                 "reveal": "always",
                 "focus": true
             }
+        },
+        {
+            "label": "🌐 VPS: コードプル & 再起動",
+            "type": "shell",
+            "command": "ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && git pull origin clean-production && screen -S aicast -X quit; sleep 2 && screen -dmS aicast bash -c \"source .venv/bin/activate && python3 run.py\"'",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            },
+            "promptOnClose": false
+        },
+        {
+            "label": "🔄 VPS: コードプル (再起動なし)",
+            "type": "shell",
+            "command": "ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && git pull origin clean-production && echo \"✅ プル完了 - アプリは継続稼働中\"'",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
+        },
+        {
+            "label": "📊 VPS: ステータス確認",
+            "type": "shell",
+            "command": "ssh ubuntu@153.126.194.114 'echo \"=== アプリ稼働状況 ===\" && ps aux | grep \"python3 run.py\" | grep -v grep && echo \"\" && echo \"=== 最新ログ ===\" && cd /home/ubuntu/aicast-app && tail -5 schedule.log && echo \"\" && tail -5 retweet.log'",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
+        },
+        {
+            "label": "🚀 VPS: アプリ再起動",
+            "type": "shell",
+            "command": "ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && screen -S aicast -X quit; sleep 3 && screen -dmS aicast bash -c \"source .venv/bin/activate && python3 run.py\" && echo \"✅ AIcast Room 再起動完了\"'",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
+        },
+        {
+            "label": "🔍 DB: スキーマ差分確認",
+            "type": "shell",
+            "command": "./db-sync-manager.sh check-schema",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "💾 DB: VPSバックアップ作成",
+            "type": "shell",
+            "command": "./db-sync-manager.sh backup-vps",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
+        },
+        {
+            "label": "📋 DB: マスタデータ差分確認",
+            "type": "shell",
+            "command": "echo '確認するテーブル名を入力してください:' && read table && ./db-sync-manager.sh check-master $table",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "🔄 DB: マスタデータ同期",
+            "type": "shell",
+            "command": "echo '同期するテーブル名を入力してください:' && read table && ./db-sync-manager.sh sync-master $table",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            },
+            "promptOnClose": false
+        },
+        {
+            "label": "🩺 DB: 健全性チェック",
+            "type": "shell",
+            "command": "./db-sync-manager.sh integrity-check",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
         }
     ]
 }

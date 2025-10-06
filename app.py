@@ -19,7 +19,7 @@ from google.oauth2.service_account import Credentials
 import pickle
 
 # 🔐 認証システムのインポート
-from auth_system import check_password, show_auth_status
+from auth_system import check_password, show_auth_status, save_current_page, get_current_page
 
 # 🔐 認証チェック（アプリの最初に実行）
 if not check_password():
@@ -2193,27 +2193,37 @@ def main():
     # メニューの選択肢
     menu_options = ["📊 ダッシュボード", "投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
     
+    # 保存されたページを取得（リロード後の復帰用）
+    saved_page = get_current_page()
+    
     # リダイレクト機能
     if st.session_state.get('redirect_to_settings'):
         page = "システム設定"
         default_index = menu_options.index("システム設定")
         st.session_state.redirect_to_settings = False  # リセット
+        save_current_page("システム設定")  # ページ状態を保存
     elif st.session_state.get('dashboard_redirect'):
         page = st.session_state.dashboard_redirect
         default_index = menu_options.index(page) if page in menu_options else 1  # 投稿管理のインデックス
+        save_current_page(page)  # ページ状態を保存
         # リダイレクト情報は後で削除する
+    elif saved_page and saved_page in menu_options:
+        # 保存されたページがある場合はそれを使用
+        default_index = menu_options.index(saved_page)
+        page = saved_page
     else:
         default_index = 0  # デフォルトはダッシュボード
+        page = "📊 ダッシュボード"
+        save_current_page("📊 ダッシュボード")
         
     # サイドバーメニューを常に表示
-    selected_page = st.sidebar.radio("メニュー", menu_options, index=default_index)
+    selected_page = st.sidebar.radio("メニュー", menu_options, index=default_index, key="main_navigation")
     
-    # リダイレクトがある場合は指定されたページを使用、それ以外は選択されたページを使用
-    if st.session_state.get('redirect_to_settings') or st.session_state.get('dashboard_redirect'):
-        # リダイレクト時は既に設定されたpageを使用
-        pass
-    else:
+    # ページ変更時の処理
+    if selected_page != page:
         page = selected_page
+        save_current_page(page)  # 新しいページ状態を保存
+        st.rerun()  # ページ変更を反映
     if page == "📊 ダッシュボード":
         st.title("📊 AIcast Room ダッシュボード")
         

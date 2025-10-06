@@ -61,11 +61,15 @@ def save_current_page(page_name):
     """現在のページを保存（URLパラメータで）"""
     auth_token, _ = get_auth_params()
     if auth_token:
+        print(f"[DEBUG] Saving page: {page_name} with token: {auth_token[:20]}...")
         set_auth_params(auth_token, page_name)
+    else:
+        print(f"[DEBUG] No auth token found, cannot save page: {page_name}")
 
 def get_current_page():
     """保存されたページを取得"""
     _, page = get_auth_params()
+    print(f"[DEBUG] Retrieved page: {page}")
     return page if page else 'dashboard'
 
 def check_password():

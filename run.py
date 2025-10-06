@@ -34,8 +34,8 @@ def find_streamlit_process():
 def main():
     print("🚀 AIcast room アプリケーションを起動中...")
     
-    # ポート8502の使用状況をチェック
-    port = 8502
+    # ポート8503の使用状況をチェック（新しいポート）
+    port = 8503
     if check_port_in_use(port):
         print(f"⚠️ ポート {port} は既に使用中です")
         

@@ -1,0 +1,24 @@
+[server]
+# セッション管理の改善
+maxUploadSize = 100
+maxMessageSize = 200
+enableCORS = true
+enableXsrfProtection = true
+
+# 静的ファイル設定
+enableStaticServing = false
+
+[browser]
+# ブラウザ関連設定
+gatherUsageStats = false
+
+[logger]
+# ログ設定
+level = "info"
+
+[theme]
+# AIcast Room ダークテーマ
+primaryColor = "#ff6b6b"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#fafafa"
