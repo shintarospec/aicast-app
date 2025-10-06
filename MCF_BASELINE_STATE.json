@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-10-04T23:19:00.852390+09:00",
+  "content_side": {
+    "ai_authentication": true,
+    "database_connectivity": true,
+    "config_integrity": true,
+    "response_times": {
+      "ai_validation": 6.4373016357421875e-06,
+      "database_query": 0.0024635791778564453
+    }
+  },
+  "broadcast_side": {
+    "cloud_functions_connectivity": false,
+    "x_api_accessibility": false,
+    "cron_configuration": true,
+    "response_times": {
+      "cloud_functions": 3.0318691730499268
+    }
+  },
+  "integration_health": {
+    "end_to_end_flow": true,
+    "scheduler_operational": true,
+    "monitoring_active": true
+  },
+  "system_configuration": {
+    "cloud_functions_url": "https://asia-northeast1-aicast-472807.cloudfunctions.net/x-poster",
+    "test_account_configured": true,
+    "mcf_validation_active": true
+  }
+}

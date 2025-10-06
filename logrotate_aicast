@@ -1,0 +1,27 @@
+# AIcast Room ログローテーション設定
+# /etc/logrotate.d/aicast に配置
+
+/var/log/aicast/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 codespace codespace
+    postrotate
+        systemctl reload aicast || true
+    endscript
+}
+
+# アプリケーションログ
+/workspaces/aicast-app/app.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 codespace codespace
+    copytruncate
+}
