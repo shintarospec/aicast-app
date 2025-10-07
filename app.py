@@ -2405,17 +2405,24 @@ def main():
 
             st.caption(f"作成日時: {post['created_at']} | テーマ: {post['theme']}")
             
-            # ウィジェットとデータベースの内容を同期
-            if f"content_{post_id}" not in st.session_state:
-                st.session_state[f"content_{post_id}"] = post['content']
+            # ウィジェットの安全な初期化（重複回避）
+            content_key = f"content_{post_id}"
+            eval_key = f"eval_{post_id}"
             
-            # データベースの内容とウィジェットの内容を同期
-            if st.session_state.get(f"content_{post_id}") != post['content']:
-                st.session_state[f"content_{post_id}"] = post['content']
+            # セッション状態の安全な初期化
+            if content_key not in st.session_state:
+                st.session_state[content_key] = post['content']
             
-            st.text_area("投稿内容", height=150, key=f"content_{post_id}")
-            eval_options = ['未評価', '◎', '◯', '△', '✕']; current_eval = post['evaluation'] if post['evaluation'] in eval_options else '未評価'
-            st.selectbox("評価", eval_options, index=eval_options.index(current_eval), key=f"eval_{post_id}")
+            # データベースと同期（ただし、ユーザー編集中は上書きしない）
+            if not hasattr(st.session_state, f"{content_key}_user_modified"):
+                if st.session_state.get(content_key) != post['content']:
+                    st.session_state[content_key] = post['content']
+            
+            st.text_area("投稿内容", height=150, key=content_key)
+            
+            eval_options = ['未評価', '◎', '◯', '△', '✕']
+            current_eval = post['evaluation'] if post['evaluation'] in eval_options else '未評価'
+            st.selectbox("評価", eval_options, index=eval_options.index(current_eval), key=eval_key)
 
             advice_master_rows = execute_query("SELECT content FROM advice_master ORDER BY id", fetch="all")
             advice_options = [row['content'] for row in advice_master_rows] if advice_master_rows else []
@@ -2458,39 +2465,78 @@ def main():
                                       (post_id, history_ts, f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{post['content']}</span>\n\n**新しい投稿:**\n{clean_generated_content(response.text)}", final_advice_str))
                             execute_query("UPDATE posts SET content = ?, evaluation = '未評価', advice = '', free_advice = '' WHERE id = ?", (clean_generated_content(response.text), post_id))
                             
+                            # セッション状態の安全な更新
+                            new_content = clean_generated_content(response.text)
+                            content_key = f"content_{post_id}"
+                            
+                            # ウィジェット状態を安全に更新
+                            try:
+                                # 既存のキーをクリア
+                                if content_key in st.session_state:
+                                    del st.session_state[content_key]
+                                # 新しい値を設定
+                                st.session_state[content_key] = new_content
+                                # 修正フラグをクリア
+                                if f"{content_key}_user_modified" in st.session_state:
+                                    del st.session_state[f"{content_key}_user_modified"]
+                                
+                                print(f"🔄 投稿ID {post_id}: セッション状態更新完了: {new_content[:50]}...")
+                            except Exception as widget_error:
+                                print(f"⚠️ ウィジェット状態更新エラー（無視可能）: {widget_error}")
+                            
                             # デバッグ情報
-                            print(f"🔄 投稿ID {post_id}: ウィジェット値を更新: {clean_generated_content(response.text)[:50]}...")
+                            print(f"🔄 投稿ID {post_id}: データベース更新完了")
                             
-                            # ウィジェットのセッション状態を強制更新
-                            st.session_state[f"content_{post_id}"] = clean_generated_content(response.text)
-                            
-                            # --- 再生成後にウィジェットのセッションキーを削除して初期化 ---
+                            # --- 再生成後にウィジェットのセッションキーをクリア ---
                             for k in [f"advice_{post_id}", f"free_advice_{post_id}", f"regen_char_limit_{post_id}"]:
                                 if k in st.session_state:
                                     del st.session_state[k]
+                            
                             # 再生成後の選択項目のリセット
                             st.session_state[f"advice_{post_id}"] = []  # アドバイスをクリア
                             st.session_state[f"free_advice_{post_id}"] = ""  # 追加アドバイスをクリア
                             st.session_state[f"regen_char_limit_{post_id}"] = 140  # 文字数を初期値に
-                            st.session_state.edit_status_message = ("success", "投稿を再生成しました！")
+                            
+                            st.session_state.edit_status_message = ("success", "✅ 投稿を再生成しました！")
+                            # ページを即座にリロードしてウィジェット競合を回避
+                            st.rerun()
                         except Exception as e:
+                            # ウィジェット競合エラーの特別処理
+                            if "cannot be modified after the widget" in str(e):
+                                print(f"⚠️ ウィジェット競合エラー（無視可能）: {str(e)}")
+                                st.session_state.edit_status_message = ("success", "✅ 投稿を再生成しました！（表示を更新中...）")
+                                st.rerun()
                             # 認証エラーの可能性をチェック
-                            auth_keywords = ["credential", "authentication", "unauthorized", "permission", "quota", "token"]
-                            if any(keyword.lower() in str(e).lower() for keyword in auth_keywords):
+                            elif any(keyword.lower() in str(e).lower() for keyword in ["credential", "authentication", "unauthorized", "permission", "quota", "token"]):
                                 st.session_state.edit_status_message = ("auth_error", str(e))
                             else:
                                 st.session_state.edit_status_message = ("error", f"再生成中にエラーが発生しました: {str(e)}")
                 st.rerun()
 
             if do_approve:
-                content = st.session_state.get(f"content_{post_id}", ""); evaluation = st.session_state.get(f"eval_{post_id}", "未評価"); advice = ",".join(st.session_state.get(f"advice_{post_id}", [])); free_advice = st.session_state.get(f"free_advice_{post_id}", "")
+                content = st.session_state.get(f"content_{post_id}", "")
+                evaluation = st.session_state.get(f"eval_{post_id}", "未評価")
+                advice = ",".join(st.session_state.get(f"advice_{post_id}", []))
+                free_advice = st.session_state.get(f"free_advice_{post_id}", "")
+                
                 created_at_row = execute_query("SELECT created_at FROM posts WHERE id = ?", (post_id,), fetch="one")
                 if created_at_row:
-                    created_at = created_at_row['created_at']; posted_at_time = created_at.split(' ')[1] if ' ' in created_at else created_at
-                    execute_query("UPDATE posts SET content = ?, evaluation = ?, advice = ?, free_advice = ?, status = 'approved', posted_at = ? WHERE id = ?", (content, evaluation, advice, free_advice, posted_at_time, post_id))
-                    st.session_state.page_status_message = ("success", "投稿を承認しました！"); clear_editing_post(); st.rerun()
+                    created_at = created_at_row['created_at']
+                    posted_at_time = created_at.split(' ')[1] if ' ' in created_at else created_at
+                    execute_query("UPDATE posts SET content = ?, evaluation = ?, advice = ?, free_advice = ?, status = 'approved', posted_at = ? WHERE id = ?", 
+                                (content, evaluation, advice, free_advice, posted_at_time, post_id))
+                    
+                    # セッション状態をクリア
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(f"content_{post_id}") or key.startswith(f"eval_{post_id}") or key.startswith(f"advice_{post_id}"):
+                            del st.session_state[key]
+                    
+                    st.session_state.page_status_message = ("success", "投稿を承認しました！")
+                    clear_editing_post()
+                    st.rerun()
                 else:
-                    st.session_state.edit_status_message = ("error", f"エラー: 投稿ID {post_id} が見つかりません。"); st.rerun()
+                    st.session_state.edit_status_message = ("error", f"エラー: 投稿ID {post_id} が見つかりません。")
+                    st.rerun()
 
             if do_save:
                 content = st.session_state.get(f"content_{post_id}", ""); evaluation = st.session_state.get(f"eval_{post_id}", "未評価"); advice = ",".join(st.session_state.get(f"advice_{post_id}", [])); free_advice = st.session_state.get(f"free_advice_{post_id}", "")
