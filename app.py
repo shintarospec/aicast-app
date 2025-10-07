@@ -3124,9 +3124,9 @@ def main():
                 if approved_posts:
                     st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
                     
-                    # 一括送信パネル
-                    with st.expander("📤 一括送信", expanded=False):
-                        st.subheader("📤 選択した投稿を一括送信")
+                    # 一括予約パネル
+                    with st.expander("� 一括予約", expanded=False):
+                        st.subheader("� 選択した投稿を一括予約")
                         
                         # 送信先選択
                         bulk_destination_options = [
@@ -3136,7 +3136,7 @@ def main():
                         ]
                         
                         bulk_destination = st.selectbox(
-                            "一括送信先",
+                            "一括予約先",
                             options=[opt[0] for opt in bulk_destination_options],
                             index=1,  # デフォルトで"🐦 X (Twitter)"を選択
                             key="bulk_destination"
@@ -3144,17 +3144,17 @@ def main():
                         
                         bulk_destination_value = next((opt[1] for opt in bulk_destination_options if opt[0] == bulk_destination), "x_api")
                         
-                        st.info(f"選択した投稿を元の投稿予定時刻で{bulk_destination}に一括送信します。")
+                        st.info(f"選択した投稿を設定された時刻で{bulk_destination}に一括予約します。")
                         
-                        # 一括送信実行
-                        if st.button("📤 選択した投稿を一括送信", type="primary", use_container_width=True):
+                        # 一括予約実行
+                        if st.button("� 選択した投稿を一括予約", type="primary", use_container_width=True):
                             selected_posts = [post_id for post_id, selected in st.session_state.items() 
                                             if post_id.startswith('select_approved_') and selected]
                             
                             if selected_posts:
                                 progress_bar = st.progress(0)
                                 status_text = st.empty()
-                                sent_count = 0
+                                scheduled_count = 0
                                 total_posts = len(selected_posts)
                                 
                                 # キャスト名とIDを取得
@@ -3165,45 +3165,82 @@ def main():
                                 for i, post_key in enumerate(selected_posts):
                                     try:
                                         post_id = post_key.replace('select_approved_', '')
-                                        status_text.text(f"投稿ID {post_id} を送信中... ({i+1}/{total_posts})")
+                                        status_text.text(f"投稿ID {post_id} を予約中... ({i+1}/{total_posts})")
                                         
                                         # 投稿データを取得
                                         post_data = next((p for p in approved_posts if str(p['id']) == post_id), None)
                                         if not post_data:
                                             continue
                                         
-                                        # 元の投稿予定時刻を使用
-                                        original_datetime = datetime.datetime.strptime(post_data['created_at'], '%Y-%m-%d %H:%M:%S')
+                                        # 時刻の優先順位: scheduled_at > posted_at > created_at
+                                        target_datetime = None
+                                        today = datetime.date.today()
                                         
-                                        # 指定された送信先に送信（キャストIDを渡す）
-                                        success, message = send_post_to_destination(cast_name_only, post_data['content'], original_datetime, bulk_destination_value, cast_id)
-                                        
-                                        if success:
-                                            # 送信成功時のデータベース更新
-                                            sent_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", (sent_at, post_id))
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
-                                                        (post_id, bulk_destination_value, sent_at, original_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
-                                            sent_count += 1
+                                        if post_data['scheduled_at']:
+                                            # 既にスケジュール時刻が設定されている場合
+                                            target_datetime = safe_datetime_parse(post_data['scheduled_at'])
+                                        elif post_data['posted_at']:
+                                            # 承認時刻を使用（今日の日付で適用）
+                                            posted_at_raw = post_data['posted_at']
+                                            if len(posted_at_raw) > 10:  # 日付部分が含まれている場合
+                                                target_datetime = safe_datetime_parse(posted_at_raw)
+                                            else:
+                                                # 時刻のみの場合は今日の日付を追加
+                                                target_datetime = safe_datetime_parse(f"{today} {posted_at_raw}")
+                                                # 今日の過去時刻の場合は明日に設定
+                                                if target_datetime and target_datetime <= datetime.datetime.now():
+                                                    tomorrow = today + datetime.timedelta(days=1)
+                                                    target_datetime = datetime.datetime.combine(tomorrow, target_datetime.time())
+                                                    print(f"📅 投稿ID {post_id}: 承認時刻が過去のため明日に調整: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
                                         else:
-                                            # 送信失敗時のログ記録
-                                            failed_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
-                                                        (post_id, bulk_destination_value, failed_at, original_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
+                                            # フォールバック: 作成時刻を使用
+                                            target_datetime = safe_datetime_parse(post_data['created_at'])
                                         
+                                        if not target_datetime:
+                                            continue
+                                        
+                                        # 現在時刻と比較して過去の場合は自動調整
+                                        now = datetime.datetime.now()
+                                        
+                                        if target_datetime <= now:
+                                            # 過去の時刻の場合
+                                            if target_datetime.date() == now.date():
+                                                # 今日の過去時刻の場合は明日の同時刻に設定
+                                                tomorrow = now.date() + datetime.timedelta(days=1)
+                                                target_datetime = datetime.datetime.combine(tomorrow, target_datetime.time())
+                                                print(f"📅 投稿ID {post_id}: 今日の過去時刻 → 明日の同時刻に自動調整: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+                                            else:
+                                                # 過去の日付の場合は明日の同時刻に設定
+                                                tomorrow = now.date() + datetime.timedelta(days=1)
+                                                target_datetime = datetime.datetime.combine(tomorrow, target_datetime.time())
+                                                print(f"📅 投稿ID {post_id}: 過去日付 → 明日の同時刻に自動調整: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+                                        else:
+                                            print(f"📅 投稿ID {post_id}: 未来時刻のため調整なし: {target_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+                                        
+                                        # スケジュール予約として保存
+                                        scheduled_at_str = target_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?", 
+                                                    (scheduled_at_str, post_id))
+                                        
+                                        # 予約履歴を記録
+                                        scheduled_at_log = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
+                                                    (post_id, bulk_destination_value, scheduled_at_log, scheduled_at_str, 'scheduled'))
+                                        
+                                        scheduled_count += 1
                                         progress_bar.progress((i + 1) / total_posts)
-                                        time.sleep(0.5)  # 短い間隔で高速処理
+                                        time.sleep(0.1)  # 高速処理
                                         
                                     except Exception as e:
-                                        st.error(f"投稿ID {post_id} の送信中にエラーが発生しました: {str(e)}")
+                                        st.error(f"投稿ID {post_id} の予約中にエラーが発生しました: {str(e)}")
                                         continue
                                 
                                 progress_bar.empty()
                                 status_text.empty()
                                 
-                                if sent_count > 0:
-                                    st.session_state.page_status_message = ("success", f"📤 {sent_count}件の投稿を{bulk_destination}に一括送信しました！")
-                                    st.success(f"✅ 処理完了: {sent_count}件の投稿を一括送信しました")
+                                if scheduled_count > 0:
+                                    st.session_state.page_status_message = ("success", f"� {scheduled_count}件の投稿を一括予約しました！スケジュール投稿タブで確認できます。")
+                                    st.success(f"✅ 処理完了: {scheduled_count}件の投稿を一括予約しました")
                                     
                                     # チェックボックスの状態をクリア
                                     for post_key in selected_posts:
