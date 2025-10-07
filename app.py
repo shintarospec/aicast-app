@@ -2447,6 +2447,9 @@ def main():
             do_approve = c2.button("✅ 承認する", type="primary", use_container_width=True, key=f"approve_detail_{post_id}")
             do_save = c3.button("💾 保存", use_container_width=True, key=f"save_{post_id}")
             do_reject = c4.button("❌ 却下", use_container_width=True, key=f"reject_detail_{post_id}")
+            
+            # デバッグ: ボタンの状態確認
+            print(f"🔗 投稿ID {post_id}: ボタン状態 - 承認:{do_approve}, 保存:{do_save}, 却下:{do_reject}, 再生成:{do_regenerate}")
 
             if do_regenerate:
                 with edit_status_placeholder:
@@ -2514,28 +2517,76 @@ def main():
                 st.rerun()
 
             if do_approve:
+                print("=" * 50)
+                print("🚨🚨🚨 個別承認ボタンが押されました！ 🚨🚨🚨")
+                print("=" * 50)
                 content = st.session_state.get(f"content_{post_id}", "")
                 evaluation = st.session_state.get(f"eval_{post_id}", "未評価")
                 advice = ",".join(st.session_state.get(f"advice_{post_id}", []))
                 free_advice = st.session_state.get(f"free_advice_{post_id}", "")
                 
-                created_at_row = execute_query("SELECT created_at FROM posts WHERE id = ?", (post_id,), fetch="one")
-                if created_at_row:
-                    created_at = created_at_row['created_at']
-                    posted_at_time = created_at.split(' ')[1] if ' ' in created_at else created_at
-                    execute_query("UPDATE posts SET content = ?, evaluation = ?, advice = ?, free_advice = ?, status = 'approved', posted_at = ? WHERE id = ?", 
-                                (content, evaluation, advice, free_advice, posted_at_time, post_id))
+                print(f"🔍 個別承認開始: 投稿ID {post_id}")
+                print(f"🔍 取得データ: content長={len(content)}, evaluation={evaluation}")
+                
+                try:
+                    # 一括承認と同じロジックを使用
+                    approval_date_jst = datetime.datetime.now(JST).date()
+                    print(f"🔍 Step 1: approval_date_jst: {approval_date_jst}")
                     
+                    created_at_row = execute_query("SELECT created_at FROM posts WHERE id = ?", (post_id,), fetch="one")
+                    print(f"🔍 Step 2: created_at_row: {created_at_row}")
+                    
+                    if created_at_row:
+                        created_at = created_at_row['created_at']
+                        print(f"🔍 Step 3: created_at: {created_at}")
+                        
+                        # created_atから時刻部分を抽出
+                        if ' ' in created_at:
+                            time_part = created_at.split(' ')[1]  # 例: '2025-10-07 14:30:00' → '14:30:00'
+                        else:
+                            time_part = created_at  # 時刻のみの場合（例: '14:30:00'）
+                        print(f"🔍 Step 4: time_part: {time_part}")
+                        
+                        # 承認日（JST）+ 設定時刻で完全なdatetimeを作成（承認日を強制更新）
+                        posted_at_full = f"{approval_date_jst.strftime('%Y-%m-%d')} {time_part}"
+                        print(f"🔍 Step 5: posted_at_full: {posted_at_full}")
+                        
+                        # データベース更新
+                        print(f"🔍 Step 6: データベース更新開始")
+                        execute_query("UPDATE posts SET content = ?, evaluation = ?, advice = ?, free_advice = ?, status = 'approved', posted_at = ?, scheduled_at = ? WHERE id = ?", 
+                                    (content, evaluation, advice, free_advice, posted_at_full, posted_at_full, post_id))
+                        print(f"📅 個別承認: 投稿ID {post_id} の投稿時刻を {posted_at_full} に設定（承認日【{approval_date_jst}】+設定時刻【{time_part}】）")
+                        print(f"📅 個別承認: scheduled_atも {posted_at_full} に設定")
+                    else:
+                        # created_at取得失敗時は承認日+現在時刻
+                        print(f"🔍 created_at取得失敗: フォールバック処理")
+                        current_time_jst = datetime.datetime.now(JST)
+                        posted_at_full = current_time_jst.strftime('%Y-%m-%d %H:%M:%S')
+                        print(f"🔍 フォールバック posted_at_full: {posted_at_full}")
+                        execute_query("UPDATE posts SET content = ?, evaluation = ?, advice = ?, free_advice = ?, status = 'approved', posted_at = ?, scheduled_at = ? WHERE id = ?", 
+                                    (content, evaluation, advice, free_advice, posted_at_full, posted_at_full, post_id))
+                        print(f"⚠️ 個別承認: 投稿ID {post_id} のcreated_atが見つからないため承認日時 {posted_at_full} を使用")
+                        print(f"⚠️ 個別承認: scheduled_atも {posted_at_full} に設定")
+
                     # セッション状態をクリア
+                    print(f"🔍 Step 7: セッション状態クリア開始")
                     for key in list(st.session_state.keys()):
                         if key.startswith(f"content_{post_id}") or key.startswith(f"eval_{post_id}") or key.startswith(f"advice_{post_id}"):
                             del st.session_state[key]
-                    
-                    st.session_state.page_status_message = ("success", "投稿を承認しました！")
+
+                    # 成功メッセージと画面更新
+                    print(f"🔍 Step 8: 成功処理開始")
+                    st.session_state.page_status_message = ("success", f"✅ 投稿ID {post_id} を承認しました！承認日【{approval_date_jst}】+設定時刻で投稿予定日時を更新しました。")
                     clear_editing_post()
+                    print(f"🔍 個別承認完了: 投稿ID {post_id}")
                     st.rerun()
-                else:
-                    st.session_state.edit_status_message = ("error", f"エラー: 投稿ID {post_id} が見つかりません。")
+                except Exception as e:
+                    import traceback
+                    error_traceback = traceback.format_exc()
+                    print(f"❌ 個別承認エラー詳細: 投稿ID {post_id}")
+                    print(f"❌ エラー内容: {str(e)}")
+                    print(f"❌ スタックトレース:\n{error_traceback}")
+                    st.session_state.edit_status_message = ("error", f"個別承認エラー: {str(e)}")
                     st.rerun()
 
             if do_save:
@@ -2890,17 +2941,43 @@ def main():
                                 
                                 if selected_posts:
                                     approved_count = 0
-                                    current_time = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                    
+                                    # 承認日をJST（日本時間）で取得
+                                    approval_date_jst = datetime.datetime.now(JST).date()
                                     
                                     for post_key in selected_posts:
                                         post_id = post_key.replace('select_draft_', '')
-                                        execute_query("UPDATE posts SET status = 'approved', posted_at = ? WHERE id = ?", 
-                                                    (current_time, post_id))
+                                        
+                                        # 投稿の既存のcreated_atから時刻部分を取得して保持
+                                        created_at_row = execute_query("SELECT created_at FROM posts WHERE id = ?", (post_id,), fetch="one")
+                                        if created_at_row:
+                                            created_at = created_at_row['created_at']
+                                            # created_atから時刻部分を抽出
+                                            if ' ' in created_at:
+                                                time_part = created_at.split(' ')[1]  # 例: '2025-10-07 14:30:00' → '14:30:00'
+                                            else:
+                                                time_part = created_at  # 時刻のみの場合（例: '14:30:00'）
+                                            
+                                            # 承認日（JST）+ 設定時刻で完全なdatetimeを作成（承認日を強制更新）
+                                            posted_at_full = f"{approval_date_jst.strftime('%Y-%m-%d')} {time_part}"
+                                            execute_query("UPDATE posts SET status = 'approved', posted_at = ?, scheduled_at = ? WHERE id = ?", 
+                                                        (posted_at_full, posted_at_full, post_id))
+                                            print(f"📅 一括承認: 投稿ID {post_id} の投稿時刻を {posted_at_full} に設定（承認日【{approval_date_jst}】+設定時刻【{time_part}】）")
+                                            print(f"📅 一括承認: scheduled_atも {posted_at_full} に設定")
+                                        else:
+                                            # フォールバック: created_atが取得できない場合は承認日+現在時刻を使用
+                                            current_time_jst = datetime.datetime.now(JST)
+                                            posted_at_full = current_time_jst.strftime('%Y-%m-%d %H:%M:%S')
+                                            execute_query("UPDATE posts SET status = 'approved', posted_at = ?, scheduled_at = ? WHERE id = ?", 
+                                                        (posted_at_full, posted_at_full, post_id))
+                                            print(f"⚠️ 一括承認: 投稿ID {post_id} のcreated_atが見つからないため承認日時 {posted_at_full} を使用")
+                                            print(f"⚠️ 一括承認: scheduled_atも {posted_at_full} に設定")
+                                        
                                         approved_count += 1
                                         # チェックボックスの状態をクリア
                                         st.session_state[post_key] = False
                                     
-                                    st.session_state.page_status_message = ("success", f"✅ {approved_count}件の投稿を一括承認しました！")
+                                    st.session_state.page_status_message = ("success", f"✅ {approved_count}件の投稿を一括承認しました！承認日【{approval_date_jst}】+設定時刻で投稿予定日時を更新しました。")
                                     st.rerun()
                                 else:
                                     st.warning("承認する投稿を選択してください。")
@@ -3517,12 +3594,18 @@ def main():
                                     actual_generated_time = safe_datetime_parse(post['generated_at'])
                                     if actual_generated_time:
                                         actual_display = actual_generated_time.strftime('%m-%d %H:%M')
-                                        st.caption(f"⏰ 作成: {actual_display} | 🕐 投稿予定: {scheduled_display} | 承認: {post['posted_at']} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
+                                        # 承認日時から日付のみを取得
+                                        approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
+                                        st.caption(f"⏰ 作成: {actual_display} | 🕐 投稿予定: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
                                     else:
-                                        st.caption(f"⏰ 作成: エラー | 🕐 投稿予定: {scheduled_display} | 承認: {post['posted_at']} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
+                                        # 承認日時から日付のみを取得
+                                        approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
+                                        st.caption(f"⏰ 作成: エラー | 🕐 投稿予定: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
                                 else:
                                     # 古いデータ（generated_atがない場合）
-                                    st.caption(f"🕐 生成時刻: {scheduled_display} | 承認: {post['posted_at']} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
+                                    # 承認日時から日付のみを取得
+                                    approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
+                                    st.caption(f"🕐 生成時刻: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
                                 
                                 # スケジュール状態に応じたアイコン表示
                                 if post['sent_status'] == 'scheduled':
