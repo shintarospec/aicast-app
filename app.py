@@ -3102,10 +3102,11 @@ def main():
                         bulk_destination = st.selectbox(
                             "一括送信先",
                             options=[opt[0] for opt in bulk_destination_options],
+                            index=1,  # デフォルトで"🐦 X (Twitter)"を選択
                             key="bulk_destination"
                         )
                         
-                        bulk_destination_value = next((opt[1] for opt in bulk_destination_options if opt[0] == bulk_destination), "google_sheets")
+                        bulk_destination_value = next((opt[1] for opt in bulk_destination_options if opt[0] == bulk_destination), "x_api")
                         
                         st.info(f"選択した投稿を元の投稿予定時刻で{bulk_destination}に一括送信します。")
                         
@@ -3538,11 +3539,12 @@ def main():
                                 selected_destination = st.selectbox(
                                     "送信先",
                                     options=[opt[0] for opt in destination_options],
+                                    index=1,  # デフォルトで"🐦 X (Twitter)"を選択
                                     key=f"destination_{post['id']}"
                                 )
                                 
                                 # 選択された送信先に応じてボタンのラベルを変更
-                                destination_value = next((opt[1] for opt in destination_options if opt[0] == selected_destination), "google_sheets")
+                                destination_value = next((opt[1] for opt in destination_options if opt[0] == selected_destination), "x_api")
                                 button_label = "📤 送信" if destination_value == "both" else selected_destination
                                 
                                 if st.button(button_label, key=f"send_{post['id']}", type="primary", use_container_width=True):
