@@ -3016,76 +3016,77 @@ def main():
                         if len(advice_list) == 0:
                             st.warning("⚠️ アドバイスマスターにデータがありません。")
                             if st.button("🔧 デフォルトアドバイスを追加", key="add_default_advice"):
-                                    default_advice_list = [
-                                        "もう少し感情表現を豊かに",
-                                        "具体的なエピソードを追加",
-                                        "読みやすさを改善",
-                                        "キャラクターらしさを強調",
-                                        "文字数を調整"
-                                    ]
-                                    for advice in default_advice_list:
-                                        execute_query("INSERT OR IGNORE INTO advice_master (content) VALUES (?)", (advice,))
-                                    st.success("デフォルトアドバイスを追加しました！")
-                                    st.rerun()
+                                default_advice_list = [
+                                    "もう少し感情表現を豊かに",
+                                    "具体的なエピソードを追加",
+                                    "読みやすさを改善",
+                                    "キャラクターらしさを強調",
+                                    "文字数を調整"
+                                ]
+                                for advice in default_advice_list:
+                                    execute_query("INSERT OR IGNORE INTO advice_master (content) VALUES (?)", (advice,))
+                                st.success("デフォルトアドバイスを追加しました！")
+                                st.rerun()
+                        
+                        # アドバイス選択UI（advice_listの有無に関わらず表示）
+                        selected_advice = st.multiselect(
+                            "改善アドバイスを選択",
+                            advice_list,
+                            key="bulk_advice_select"
+                        )
+                        
+                        custom_advice = st.text_area(
+                            "カスタム改善指示（任意）",
+                            placeholder="具体的な改善指示を入力...",
+                            key="bulk_custom_advice"
+                        )
+                        
+                        if st.button("選択した投稿を一括チューニング（AI改善）", type="primary", use_container_width=True):
+                            selected_posts = [post_id for post_id, selected in st.session_state.items() 
+                                            if post_id.startswith('select_draft_') and selected]
                             
-                            selected_advice = st.multiselect(
-                                "改善アドバイスを選択",
-                                advice_list,
-                                key="bulk_advice_select"
-                            )
-                            
-                            custom_advice = st.text_area(
-                                "カスタム改善指示（任意）",
-                                placeholder="具体的な改善指示を入力...",
-                                key="bulk_custom_advice"
-                            )
-                            
-                            if st.button("選択した投稿を一括チューニング（AI改善）", type="primary", use_container_width=True):
-                                selected_posts = [post_id for post_id, selected in st.session_state.items() 
-                                                if post_id.startswith('select_draft_') and selected]
+                            if selected_posts and (selected_advice or custom_advice.strip()):
+                                if 'gemini_model' not in st.session_state:
+                                    st.error("AIモデルが読み込まれていません。ページを更新してください。")
+                                    return
                                 
-                                if selected_posts and (selected_advice or custom_advice.strip()):
-                                    if 'gemini_model' not in st.session_state:
-                                        st.error("AIモデルが読み込まれていません。ページを更新してください。")
-                                        return
-                                    
-                                    # 改善指示を統合
-                                    improvement_instructions = []
-                                    if selected_advice:
-                                        improvement_instructions.extend(selected_advice)
-                                    if custom_advice.strip():
-                                        improvement_instructions.append(custom_advice.strip())
-                                    
-                                    instructions_text = "\n- ".join(improvement_instructions)
-                                    
-                                    progress_bar = st.progress(0)
-                                    status_text = st.empty()
-                                    improved_count = 0
-                                    total_posts = len(selected_posts)
-                                    
-                                    for i, post_key in enumerate(selected_posts):
-                                        try:
-                                            post_id = post_key.replace('select_draft_', '')
-                                            status_text.text(f"投稿ID {post_id} を改善中... ({i+1}/{total_posts})")
-                                            
-                                            # 元の投稿を取得
-                                            original_post = execute_query("SELECT * FROM posts WHERE id = ?", (post_id,), fetch="one")
-                                            if not original_post:
-                                                continue
-                                            
-                                            # キャスト情報を取得
-                                            cast_info = execute_query("SELECT * FROM casts WHERE id = ?", (original_post['cast_id'],), fetch="one")
-                                            if not cast_info:
-                                                continue
-                                            
-                                            # ペルソナシートを作成
-                                            persona_sheet = ""
-                                            for field in PERSONA_FIELDS:
-                                                if cast_info[field]:
-                                                    persona_sheet += f"**{field}**: {cast_info[field]}\n"
-                                            
-                                            # 改善プロンプトを作成
-                                            improvement_prompt = f"""# ペルソナ
+                                # 改善指示を統合
+                                improvement_instructions = []
+                                if selected_advice:
+                                    improvement_instructions.extend(selected_advice)
+                                if custom_advice.strip():
+                                    improvement_instructions.append(custom_advice.strip())
+                                
+                                instructions_text = "\n- ".join(improvement_instructions)
+                                
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                improved_count = 0
+                                total_posts = len(selected_posts)
+                                
+                                for i, post_key in enumerate(selected_posts):
+                                    try:
+                                        post_id = post_key.replace('select_draft_', '')
+                                        status_text.text(f"投稿ID {post_id} を改善中... ({i+1}/{total_posts})")
+                                        
+                                        # 元の投稿を取得
+                                        original_post = execute_query("SELECT * FROM posts WHERE id = ?", (post_id,), fetch="one")
+                                        if not original_post:
+                                            continue
+                                        
+                                        # キャスト情報を取得
+                                        cast_info = execute_query("SELECT * FROM casts WHERE id = ?", (original_post['cast_id'],), fetch="one")
+                                        if not cast_info:
+                                            continue
+                                        
+                                        # ペルソナシートを作成
+                                        persona_sheet = ""
+                                        for field in PERSONA_FIELDS:
+                                            if cast_info[field]:
+                                                persona_sheet += f"**{field}**: {cast_info[field]}\n"
+                                        
+                                        # 改善プロンプトを作成
+                                        improvement_prompt = f"""# ペルソナ
 {persona_sheet}
 
 # 元の投稿
@@ -3097,49 +3098,49 @@ def main():
 # ルール
 上記の改善指示に従って投稿を改善してください。キャラクターの個性を保ちながら、指示された点を改善した新しい投稿を生成してください。元の投稿のテーマとメッセージは維持してください。"""
 
-                                            # AI で改善
-                                            response = safe_generate_content(st.session_state.gemini_model, improvement_prompt)
-                                            improved_content = clean_generated_content(response.text)
-                                            
-                                            # チューニング履歴に記録
-                                            timestamp = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            combined_advice = ",".join(selected_advice) if selected_advice else ""
-                                            execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
-                                                        (post_id, timestamp, original_post['content'], instructions_text))
-                                            
-                                            # 投稿内容を更新
-                                            execute_query("UPDATE posts SET content = ?, advice = ?, free_advice = ? WHERE id = ?", 
-                                                        (improved_content, combined_advice, custom_advice.strip(), post_id))
-                                            
-                                            improved_count += 1
-                                            progress_bar.progress((i + 1) / total_posts)
-                                            time.sleep(1)  # API制限対策
-                                            
-                                        except Exception as e:
-                                            st.error(f"投稿ID {post_id} の改善中にエラーが発生しました: {str(e)}")
-                                            continue
+                                        # AI で改善
+                                        response = safe_generate_content(st.session_state.gemini_model, improvement_prompt)
+                                        improved_content = clean_generated_content(response.text)
+                                        
+                                        # チューニング履歴に記録
+                                        timestamp = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                        combined_advice = ",".join(selected_advice) if selected_advice else ""
+                                        execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
+                                                    (post_id, timestamp, original_post['content'], instructions_text))
+                                        
+                                        # 投稿内容を更新
+                                        execute_query("UPDATE posts SET content = ?, advice = ?, free_advice = ? WHERE id = ?", 
+                                                    (improved_content, combined_advice, custom_advice.strip(), post_id))
+                                        
+                                        improved_count += 1
+                                        progress_bar.progress((i + 1) / total_posts)
+                                        time.sleep(1)  # API制限対策
+                                        
+                                    except Exception as e:
+                                        st.error(f"投稿ID {post_id} の改善中にエラーが発生しました: {str(e)}")
+                                        continue
+                                
+                                progress_bar.empty()
+                                status_text.empty()
+                                
+                                if improved_count > 0:
+                                    st.session_state.page_status_message = ("success", f"🎯 {improved_count}件の投稿を改善しました！")
+                                    st.success(f"✅ 処理完了: {improved_count}件の投稿をAIで改善しました")
                                     
-                                    progress_bar.empty()
-                                    status_text.empty()
+                                    # チェックボックスの状態をクリア
+                                    for post_key in selected_posts:
+                                        st.session_state[post_key] = False
                                     
-                                    if improved_count > 0:
-                                        st.session_state.page_status_message = ("success", f"� {improved_count}件の投稿を改善しました！")
-                                        st.success(f"✅ 処理完了: {improved_count}件の投稿をAIで改善しました")
-                                        
-                                        # チェックボックスの状態をクリア
-                                        for post_key in selected_posts:
-                                            st.session_state[post_key] = False
-                                        
-                                        time.sleep(2)
-                                        st.rerun()
-                                    else:
-                                        st.error("投稿の改善に失敗しました。")
-                                        
+                                    time.sleep(2)
+                                    st.rerun()
                                 else:
-                                    if not selected_posts:
-                                        st.warning("改善する投稿を選択してください。")
-                                    else:
-                                        st.warning("改善指示を入力してください。")
+                                    st.error("投稿の改善に失敗しました。")
+                                    
+                            else:
+                                if not selected_posts:
+                                    st.warning("改善する投稿を選択してください。")
+                                else:
+                                    st.warning("改善指示を入力してください。")
                     
                     st.markdown("---")
                     
