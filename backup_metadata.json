@@ -1,0 +1,11 @@
+{
+  "backup_date": "20251006_051126",
+  "backup_type": "complete_system",
+  "app_version": "6466 lines",
+  "git_commit": "155784e3991d",
+  "files_count": 46,
+  "total_size_bytes": 2001894,
+  "mcf_death_guard_incident": "recovered",
+  "github_security_bypass": "active",
+  "secret_manager_status": "disabled"
+}

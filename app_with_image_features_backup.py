@@ -344,7 +344,7 @@ def init_db():
     """データベースとテーブルを初期化する"""
     persona_columns = ", ".join([f"{field} TEXT" for field in PERSONA_FIELDS if field != 'name'])
     casts_table_query = f"CREATE TABLE IF NOT EXISTS casts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, {persona_columns})"
-    posts_table_query = "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, cast_id INTEGER, created_at TEXT, content TEXT, theme TEXT, evaluation TEXT, advice TEXT, free_advice TEXT, status TEXT DEFAULT 'draft', posted_at TEXT, sent_status TEXT DEFAULT 'not_sent', sent_at TEXT, generated_at TEXT, scheduled_at TEXT, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
+    posts_table_query = "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, cast_id INTEGER, created_at TEXT, content TEXT, theme TEXT, evaluation TEXT, advice TEXT, free_advice TEXT, status TEXT DEFAULT 'draft', posted_at TEXT, sent_status TEXT DEFAULT 'not_sent', sent_at TEXT, generated_at TEXT, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
     situations_table_query = "CREATE TABLE IF NOT EXISTS situations (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE, time_slot TEXT DEFAULT 'いつでも', category_id INTEGER, FOREIGN KEY(category_id) REFERENCES situation_categories(id) ON DELETE CASCADE)"
     categories_table_query = "CREATE TABLE IF NOT EXISTS situation_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)"
     advice_table_query = 'CREATE TABLE IF NOT EXISTS advice_master (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE)'
@@ -370,6 +370,20 @@ def init_db():
         
         if 'generated_at' not in column_names:
             execute_query("ALTER TABLE posts ADD COLUMN generated_at TEXT")
+            
+        # 画像関連カラムの追加（強制実行）
+        if 'image_paths' not in column_names:
+            execute_query("ALTER TABLE posts ADD COLUMN image_paths TEXT")  # JSON形式で複数画像パスを保存
+            print("✅ image_pathsカラムを追加しました")
+        else:
+            print("✅ image_pathsカラムは既に存在します")
+        
+        if 'has_images' not in column_names:
+            execute_query("ALTER TABLE posts ADD COLUMN has_images INTEGER DEFAULT 0")  # 画像添付フラグ
+            print("✅ has_imagesカラムを追加しました")
+        else:
+            print("✅ has_imagesカラムは既に存在します")
+            
     except Exception as e:
         # カラム追加でエラーが発生した場合は無視（既に存在する場合など）
         pass
@@ -1719,8 +1733,8 @@ def get_account_id_for_cast_local(cast_name):
         st.error(f"❌ アカウントID取得エラー: {str(e)}")
         return None
 
-def send_to_x_api(cast_name, post_content, scheduled_datetime=None, cast_id=None):
-    """Cloud Functions経由でX (Twitter) APIに投稿を送信する"""
+def send_to_x_api(cast_name, post_content, scheduled_datetime=None, cast_id=None, image_paths=None):
+    """Cloud Functions経由でX (Twitter) APIに投稿を送信する（画像対応）"""
     try:
         # Cloud Functions投稿クライアントを初期化
         cloud_poster = CloudFunctionsPoster(Config.get_cloud_functions_url())
@@ -1730,12 +1744,18 @@ def send_to_x_api(cast_name, post_content, scheduled_datetime=None, cast_id=None
         if not account_id:
             return False, f"❌ キャスト '{cast_name}' のX APIアカウント設定が見つかりません"
         
-        # Cloud Functions経由で投稿
-        result = cloud_poster.post_tweet(account_id, post_content)
+        # 画像がある場合の処理
+        if image_paths:
+            # 画像付きでCloud Functions経由で投稿
+            result = cloud_poster.post_tweet(account_id, post_content, image_url=image_paths[0] if image_paths else None)
+        else:
+            # テキストのみでCloud Functions経由で投稿
+            result = cloud_poster.post_tweet(account_id, post_content)
         
         if result.get("status") == "success":
             tweet_id = result.get("tweet_id", "")
-            return True, f"✅ X (Twitter) に投稿しました！ Tweet ID: {tweet_id}"
+            image_info = f" (画像{len(image_paths)}枚)" if image_paths else ""
+            return True, f"✅ X (Twitter) に投稿しました{image_info}！ Tweet ID: {tweet_id}"
         else:
             error_msg = result.get("message", "投稿に失敗しました")
             return False, f"❌ X API投稿エラー: {error_msg}"
@@ -1918,16 +1938,16 @@ def delete_cast_sheets_config(cast_id):
         st.error(f"Google Sheets設定削除エラー: {str(e)}")
         return False
 
-def send_post_to_destination(cast_name, post_content, scheduled_datetime, destination, cast_id=None):
-    """投稿を指定した送信先に送信する統合関数（キャスト別設定対応）"""
+def send_post_to_destination(cast_name, post_content, scheduled_datetime, destination, cast_id=None, image_paths=None):
+    """投稿を指定した送信先に送信する統合関数（キャスト別設定対応・画像対応）"""
     if destination == "google_sheets":
-        return send_to_google_sheets(cast_name, post_content, scheduled_datetime, cast_id)
+        return send_to_google_sheets(cast_name, post_content, scheduled_datetime, cast_id, image_urls=image_paths)
     elif destination == "x_api":
-        return send_to_x_api(cast_name, post_content, scheduled_datetime, cast_id)
+        return send_to_x_api(cast_name, post_content, scheduled_datetime, cast_id, image_paths=image_paths)
     elif destination == "both":
         # 両方に送信
-        sheets_success, sheets_message = send_to_google_sheets(cast_name, post_content, scheduled_datetime, cast_id)
-        x_success, x_message = send_to_x_api(cast_name, post_content, scheduled_datetime, cast_id)
+        sheets_success, sheets_message = send_to_google_sheets(cast_name, post_content, scheduled_datetime, cast_id, image_urls=image_paths)
+        x_success, x_message = send_to_x_api(cast_name, post_content, scheduled_datetime, cast_id, image_paths=image_paths)
         
         if sheets_success and x_success:
             return True, "Google Sheets と X (Twitter) 両方に送信しました！"
@@ -2354,7 +2374,15 @@ def main():
                     time.sleep(2); edit_status_placeholder.empty()
 
             post_id = st.session_state.editing_post_id
+            
+            # チューニング後の最新データを強制的に取得
+            print(f"🔍 投稿データ取得 - 投稿ID: {post_id}")
             post = execute_query("SELECT p.*, c.name as cast_name FROM posts p JOIN casts c ON p.cast_id = c.id WHERE p.id = ?", (post_id,), fetch="one")
+            if post:
+                print(f"📄 取得した投稿内容: {post['content'][:100]}...")
+            else:
+                print(f"❌ 投稿ID {post_id} が見つかりません")
+            
             if not post:
                 st.error("投稿の読み込みに失敗しました。一覧に戻ります。")
                 clear_editing_post(); st.rerun()
@@ -2368,7 +2396,17 @@ def main():
                 clear_editing_post(); st.rerun()
 
             st.caption(f"作成日時: {post['created_at']} | テーマ: {post['theme']}")
-            st.text_area("投稿内容", value=post['content'], height=150, key=f"content_{post_id}")
+            
+            # チューニング後にウィジェットの値を強制更新
+            if f"content_{post_id}" not in st.session_state:
+                st.session_state[f"content_{post_id}"] = post['content']
+            
+            # データベースの内容とウィジェットの内容を同期
+            if st.session_state.get(f"content_{post_id}") != post['content']:
+                print(f"🔄 ウィジェット値を更新: {post['content'][:50]}...")
+                st.session_state[f"content_{post_id}"] = post['content']
+                
+            st.text_area("投稿内容", height=150, key=f"content_{post_id}")
             eval_options = ['未評価', '◎', '◯', '△', '✕']; current_eval = post['evaluation'] if post['evaluation'] in eval_options else '未評価'
             st.selectbox("評価", eval_options, index=eval_options.index(current_eval), key=f"eval_{post_id}")
 
@@ -2408,10 +2446,54 @@ def main():
                             persona_sheet = format_persona(selected_cast_id, selected_cast_details)
                             regeneration_prompt = f"""# ペルソナ\n{persona_sheet}\n\n# シチュエーション\n{post['theme']}\n\n# 以前の投稿（これは失敗作です）\n{post['content']}\n\n# プロデューサーからの改善アドバイス\n「{final_advice_str}」\n\n# 指示\n以前の投稿を改善アドバイスを元に書き直してください。\n\n# ルール\n- **{regen_char_limit}文字以内**で生成。"""
                             response = safe_generate_content(st.session_state.gemini_model, regeneration_prompt)
-                            # 履歴に保存：前の投稿内容とアドバイス、そして新しい投稿内容
-                            execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
-                                      (post_id, history_ts, f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{post['content']}</span>\n\n**新しい投稿:**\n{clean_generated_content(response.text)}", final_advice_str))
-                            execute_query("UPDATE posts SET content = ?, evaluation = '未評価', advice = '', free_advice = '' WHERE id = ?", (clean_generated_content(response.text), post_id))
+                            new_content = clean_generated_content(response.text)
+                            
+                            print(f"🔧 チューニング開始 - 投稿ID: {post_id}")
+                            print(f"📝 元の内容: {post['content'][:100]}...")
+                            print(f"✨ 新しい内容: {new_content[:100]}...")
+                            
+                            # データベース更新をトランザクションで実行
+                            import sqlite3
+                            db_path = 'casting_office.db'
+                            conn = sqlite3.connect(db_path)
+                            conn.row_factory = sqlite3.Row
+                            try:
+                                cursor = conn.cursor()
+                                
+                                # 更新前のデータを確認
+                                cursor.execute("SELECT content FROM posts WHERE id = ?", (post_id,))
+                                before_update = cursor.fetchone()
+                                print(f"🔍 更新前DB内容: {before_update['content'][:100] if before_update else 'なし'}...")
+                                
+                                # 1. 履歴に保存（前の投稿内容のみ）
+                                cursor.execute("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
+                                             (post_id, history_ts, f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{post['content']}</span>\n\n**新しい投稿:**\n{new_content}", final_advice_str))
+                                print(f"✅ 履歴保存完了")
+                                
+                                # 2. 投稿内容を更新
+                                cursor.execute("UPDATE posts SET content = ?, evaluation = '未評価', advice = '', free_advice = '' WHERE id = ?", (new_content, post_id))
+                                affected_rows = cursor.rowcount
+                                print(f"📊 UPDATE文実行 - 影響行数: {affected_rows}")
+                                
+                                # 更新後のデータを確認
+                                cursor.execute("SELECT content FROM posts WHERE id = ?", (post_id,))
+                                after_update = cursor.fetchone()
+                                print(f"🔍 更新後DB内容: {after_update['content'][:100] if after_update else 'なし'}...")
+                                
+                                conn.commit()
+                                print(f"✅ コミット完了 - 投稿ID: {post_id}")
+                                
+                                # 最終確認
+                                cursor.execute("SELECT content FROM posts WHERE id = ?", (post_id,))
+                                final_check = cursor.fetchone()
+                                print(f"🎯 最終確認: {final_check['content'][:100] if final_check else 'なし'}...")
+                                
+                            except Exception as db_error:
+                                conn.rollback()
+                                print(f"❌ DB更新エラー: {db_error}")
+                                raise db_error
+                            finally:
+                                conn.close()
                             # --- 再生成後にウィジェットのセッションキーを削除して初期化 ---
                             for k in [f"advice_{post_id}", f"free_advice_{post_id}", f"regen_char_limit_{post_id}"]:
                                 if k in st.session_state:
@@ -3068,7 +3150,7 @@ def main():
 
 **注意**: 初回送信時にブラウザでGoogle認証が必要です。認証後はトークンが自動保存されます。""")
                 
-                approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status = 'scheduled' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
+                approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
                 if approved_posts:
                     st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
                     
@@ -3083,25 +3165,29 @@ def main():
                             ("📊🐦 両方に送信", "both")
                         ]
                         
+                        # 一括送信の初期値もX (Twitter)に設定
+                        default_bulk_destination_index = 1  # "🐦 X (Twitter)" のインデックス
+                        
                         bulk_destination = st.selectbox(
                             "一括送信先",
                             options=[opt[0] for opt in bulk_destination_options],
+                            index=default_bulk_destination_index,
                             key="bulk_destination"
                         )
                         
                         bulk_destination_value = next((opt[1] for opt in bulk_destination_options if opt[0] == bulk_destination), "google_sheets")
                         
-                        st.info(f"選択した投稿を元の投稿予定時刻で{bulk_destination}に一括送信します。")
+                        st.info(f"選択した投稿を設定された時刻で{bulk_destination}に一括予約します。")
                         
                         # 一括送信実行
-                        if st.button("📤 選択した投稿を一括送信", type="primary", use_container_width=True):
+                        if st.button("� 選択した投稿を一括予約", type="primary", use_container_width=True):
                             selected_posts = [post_id for post_id, selected in st.session_state.items() 
                                             if post_id.startswith('select_approved_') and selected]
                             
                             if selected_posts:
                                 progress_bar = st.progress(0)
                                 status_text = st.empty()
-                                sent_count = 0
+                                scheduled_count = 0
                                 total_posts = len(selected_posts)
                                 
                                 # キャスト名とIDを取得
@@ -3112,45 +3198,66 @@ def main():
                                 for i, post_key in enumerate(selected_posts):
                                     try:
                                         post_id = post_key.replace('select_approved_', '')
-                                        status_text.text(f"投稿ID {post_id} を送信中... ({i+1}/{total_posts})")
+                                        status_text.text(f"投稿ID {post_id} を予約中... ({i+1}/{total_posts})")
                                         
                                         # 投稿データを取得
                                         post_data = next((p for p in approved_posts if str(p['id']) == post_id), None)
                                         if not post_data:
                                             continue
                                         
-                                        # 元の投稿予定時刻を使用
-                                        original_datetime = datetime.datetime.strptime(post_data['created_at'], '%Y-%m-%d %H:%M:%S')
-                                        
-                                        # 指定された送信先に送信（キャストIDを渡す）
-                                        success, message = send_post_to_destination(cast_name_only, post_data['content'], original_datetime, bulk_destination_value, cast_id)
-                                        
-                                        if success:
-                                            # 送信成功時のデータベース更新
-                                            sent_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", (sent_at, post_id))
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
-                                                        (post_id, bulk_destination_value, sent_at, original_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
-                                            sent_count += 1
+                                        # 設定された時刻を優先的に使用（個別設定を尊重）
+                                        if post_data['scheduled_at']:
+                                            # 個別に設定された予約時刻を使用
+                                            scheduled_datetime = datetime.datetime.strptime(post_data['scheduled_at'], '%Y-%m-%d %H:%M:%S')
+                                        elif post_data['posted_at']:
+                                            # 承認時刻をベースに設定
+                                            try:
+                                                # posted_at が完全な日時形式かチェック
+                                                if len(post_data['posted_at']) > 10:  # 日付部分が含まれている場合
+                                                    scheduled_datetime = datetime.datetime.strptime(post_data['posted_at'], '%Y-%m-%d %H:%M:%S')
+                                                else:
+                                                    # 時刻のみの場合は今日の日付を追加
+                                                    scheduled_datetime = datetime.datetime.strptime(f"{datetime.date.today()} {post_data['posted_at']}", '%Y-%m-%d %H:%M')
+                                            except:
+                                                try:
+                                                    # フォーマットが異なる場合の処理
+                                                    scheduled_datetime = datetime.datetime.strptime(post_data['posted_at'], '%Y-%m-%d %H:%M')
+                                                except:
+                                                    # 最終的なフォールバック：作成時刻を使用
+                                                    scheduled_datetime = datetime.datetime.strptime(post_data['created_at'], '%Y-%m-%d %H:%M:%S')
                                         else:
-                                            # 送信失敗時のログ記録
-                                            failed_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
-                                                        (post_id, bulk_destination_value, failed_at, original_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
+                                            # フォールバック：元の作成時刻を使用
+                                            scheduled_datetime = datetime.datetime.strptime(post_data['created_at'], '%Y-%m-%d %H:%M:%S')
                                         
+                                        # 現在時刻より未来かチェック
+                                        current_time = datetime.datetime.now()
+                                        if scheduled_datetime <= current_time:
+                                            # 過去時刻の場合は明日の同時刻に設定
+                                            scheduled_datetime = scheduled_datetime.replace(year=current_time.year, month=current_time.month, day=current_time.day) + datetime.timedelta(days=1)
+                                        
+                                        # スケジュール予約として設定
+                                        scheduled_at_str = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?", 
+                                                    (scheduled_at_str, post_id))
+                                        
+                                        # 送信履歴にスケジュール予約として記録
+                                        execute_query("INSERT INTO send_history (post_id, destination, scheduled_datetime, status) VALUES (?, ?, ?, ?)", 
+                                                    (post_id, bulk_destination_value, scheduled_at_str, 'scheduled'))
+                                        
+                                        scheduled_count += 1
                                         progress_bar.progress((i + 1) / total_posts)
-                                        time.sleep(0.5)  # 短い間隔で高速処理
+                                        time.sleep(0.2)  # 高速処理
                                         
                                     except Exception as e:
-                                        st.error(f"投稿ID {post_id} の送信中にエラーが発生しました: {str(e)}")
+                                        st.error(f"投稿ID {post_id} の予約中にエラーが発生しました: {str(e)}")
                                         continue
                                 
                                 progress_bar.empty()
                                 status_text.empty()
                                 
-                                if sent_count > 0:
-                                    st.session_state.page_status_message = ("success", f"📤 {sent_count}件の投稿を{bulk_destination}に一括送信しました！")
-                                    st.success(f"✅ 処理完了: {sent_count}件の投稿を一括送信しました")
+                                if scheduled_count > 0:
+                                    st.session_state.page_status_message = ("success", f"� {scheduled_count}件の投稿を{bulk_destination}に一括予約しました！スケジュール投稿タブで確認できます。")
+                                    st.success(f"✅ 処理完了: {scheduled_count}件の投稿を一括予約しました")
                                     
                                     # チェックボックスの状態をクリア
                                     for post_key in selected_posts:
@@ -3162,92 +3269,6 @@ def main():
                                     st.error("投稿の送信に失敗しました。")
                             else:
                                 st.warning("送信する投稿を選択してください。")
-                    
-                    # 画像付き投稿セクション
-                    with st.expander("📸 画像付き投稿", expanded=False):
-                        st.subheader("📸 画像付きX投稿")
-                        st.info("画像ファイルをアップロードして、投稿と一緒にX（Twitter）に送信できます。")
-                        
-                        # 投稿テキスト入力
-                        image_post_text = st.text_area(
-                            "投稿テキスト",
-                            placeholder="画像付き投稿のテキストを入力してください...",
-                            max_chars=280,
-                            help="最大280文字まで入力可能"
-                        )
-                        
-                        # 画像ファイルアップロード
-                        uploaded_images = st.file_uploader(
-                            "画像ファイル（最大4枚）",
-                            type=['jpg', 'jpeg', 'png', 'gif', 'webp'],
-                            accept_multiple_files=True,
-                            help="対応形式: JPG, PNG, GIF, WebP（各5MB以下、最大4枚）"
-                        )
-                        
-                        # アップロードされた画像の確認
-                        if uploaded_images:
-                            if len(uploaded_images) > 4:
-                                st.warning("⚠️ 画像は最大4枚まで添付できます。最初の4枚が使用されます。")
-                                uploaded_images = uploaded_images[:4]
-                            
-                            st.write(f"📸 アップロード済み画像: {len(uploaded_images)}枚")
-                            
-                            # 画像プレビュー
-                            cols = st.columns(len(uploaded_images))
-                            for i, img in enumerate(uploaded_images):
-                                with cols[i]:
-                                    st.image(img, caption=f"画像{i+1}: {img.name}", use_column_width=True)
-                        
-                        # 投稿ボタン
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("📸 画像付きでX投稿", type="primary", use_container_width=True):
-                                if not image_post_text.strip():
-                                    st.error("⚠️ 投稿テキストを入力してください")
-                                elif not uploaded_images:
-                                    st.error("⚠️ 画像をアップロードしてください")
-                                else:
-                                    with st.spinner("画像付き投稿を送信中..."):
-                                        try:
-                                            # アップロードされた画像を一時保存
-                                            temp_image_paths = []
-                                            os.makedirs("temp_images", exist_ok=True)
-                                            
-                                            for img in uploaded_images:
-                                                temp_path = f"temp_images/{img.name}"
-                                                with open(temp_path, "wb") as f:
-                                                    f.write(img.getvalue())
-                                                temp_image_paths.append(temp_path)
-                                            
-                                            # 画像付き投稿実行
-                                            current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
-                                            cast_id = current_cast['id'] if current_cast else None
-                                            
-                                            success, message = x_poster.post_tweet_with_media(
-                                                text=image_post_text,
-                                                media_paths=temp_image_paths,
-                                                cast_name=selected_cast_name,
-                                                cast_id=cast_id
-                                            )
-                                            
-                                            # 一時ファイル削除
-                                            for temp_path in temp_image_paths:
-                                                try:
-                                                    os.remove(temp_path)
-                                                except:
-                                                    pass
-                                            
-                                            if success:
-                                                st.success(f"✅ {message}")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"❌ {message}")
-                                                
-                                        except Exception as e:
-                                            st.error(f"❌ 画像付き投稿エラー: {str(e)}")
-                        
-                        with col2:
-                            st.info("💡 ヒント\n・画像は自動リサイズされます\n・X APIのFREEプランで利用可能\n・最大4枚まで同時投稿可能")
                     
                     # Google Sheets画像URL送信セクション
                     with st.expander("📊 Google Drive → Google Sheets送信", expanded=False):
@@ -3392,126 +3413,377 @@ def main():
                                     st.success(post['content'], icon="✔")
                             
                             with col_datetime:
-                                # 投稿時刻の取得（スケジュール投稿がある場合は scheduled_at を優先）
-                                if post['scheduled_at'] and post['sent_status'] == 'scheduled':
-                                    # スケジュール投稿として保存されている場合
-                                    current_scheduled_datetime = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
-                                    original_datetime = current_scheduled_datetime
-                                    st.caption(f"📅 スケジュール時刻: {current_scheduled_datetime.strftime('%m-%d %H:%M')} | 🕒 元の投稿時刻: {datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%H:%M')}")
+                                # 現在の投稿予定時刻を取得（優先順位あり）
+                                if post['scheduled_at']:
+                                    # 最新の予約日時を最優先で使用（スケジュール済み・承認済み問わず）
+                                    current_datetime = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
+                                    st.caption(f"📅 保存済み予約時刻: {current_datetime.strftime('%m-%d %H:%M')}")
+                                elif post['posted_at']:
+                                    # 承認時刻を次点で使用
+                                    try:
+                                        # posted_at が完全な日時形式かチェック
+                                        if len(post['posted_at']) > 10:  # 日付部分が含まれている場合
+                                            current_datetime = datetime.datetime.strptime(post['posted_at'], '%Y-%m-%d %H:%M:%S')
+                                        else:
+                                            # 時刻のみの場合は今日の日付を追加
+                                            current_datetime = datetime.datetime.strptime(f"{datetime.date.today()} {post['posted_at']}", '%Y-%m-%d %H:%M')
+                                    except:
+                                        try:
+                                            # フォーマットが異なる場合の処理
+                                            current_datetime = datetime.datetime.strptime(post['posted_at'], '%Y-%m-%d %H:%M')
+                                        except:
+                                            # 最終的なフォールバック：作成時刻を使用
+                                            current_datetime = datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S')
+                                    st.caption(f"🕐 承認時刻: {post['posted_at']}")
                                 else:
-                                    # 通常の投稿または未スケジュール
-                                    original_datetime = datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S')
-                                    st.caption(f"🕒 元の投稿時刻: {original_datetime.strftime('%H:%M')}")
+                                    # フォールバック：作成時刻を使用
+                                    current_datetime = datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S')
+                                    st.caption(f"📝 作成時刻を使用: {current_datetime.strftime('%m-%d %H:%M')}")
                                 
-                                # 日時選択オプション
-                                time_options = [
-                                    ("元の投稿時刻を使用", original_datetime),
-                                    ("カスタム時刻を指定", None)
-                                ]
+                                # シンプルな時刻設定UI
+                                st.caption("� 投稿予定時刻の設定")
                                 
-                                selected_option = st.selectbox(
-                                    "送信時刻の設定", 
-                                    options=[opt[0] for opt in time_options],
-                                    key=f"time_option_{post['id']}"
+                                # 日付入力（過去の日付の場合は今日の日付を使用）
+                                today = datetime.date.today()
+                                initial_date = max(current_datetime.date(), today)  # 今日以降の日付を確保
+                                
+                                send_date = st.date_input(
+                                    "送信日",
+                                    value=initial_date,
+                                    min_value=today,
+                                    key=f"simple_date_{post['id']}"
                                 )
                                 
-                                if selected_option == "元の投稿時刻を使用":
-                                    scheduled_datetime = original_datetime
-                                    st.info(f"📅 {original_datetime.strftime('%Y-%m-%d %H:%M')} で送信")
+                                # 時刻入力方法の選択
+                                time_input_method = st.radio(
+                                    "時刻入力方法",
+                                    ["🔢 数値入力（1分単位）", "� プルダウン選択（5分刻み）"],
+                                    key=f"time_method_{post['id']}",
+                                    horizontal=True
+                                )
+                                
+                                # 過去の投稿の場合は現在時刻を初期値として使用
+                                now = datetime.datetime.now()
+                                if current_datetime.date() < today:
+                                    initial_hour = now.hour
+                                    initial_minute = now.minute
+                                    st.info("⚠️ 過去の投稿のため、現在時刻を初期値として設定しています")
                                 else:
-                                    # カスタム送信日時設定
-                                    col_date, col_time_method = st.columns([1, 1])
+                                    initial_hour = current_datetime.hour
+                                    initial_minute = current_datetime.minute
+                                
+                                if time_input_method == "🔢 数値入力（1分単位）":
+                                    # 数値入力方式（1分単位で完全自由）
+                                    col_hour_num, col_minute_num = st.columns(2)
                                     
-                                    with col_date:
-                                        send_date = st.date_input("送信日", key=f"date_{post['id']}", min_value=datetime.date.today())
-                                    
-                                    with col_time_method:
-                                        time_method = st.radio(
-                                            "時刻設定方法",
-                                            ["プリセット時間", "カスタム時間"],
-                                            key=f"time_method_{post['id']}"
+                                    with col_hour_num:
+                                        hour_input = st.number_input(
+                                            "時（0-23）",
+                                            min_value=0,
+                                            max_value=23,
+                                            value=initial_hour,
+                                            key=f"hour_input_{post['id']}",
+                                            help="0〜23時まで1時間単位で入力"
                                         )
                                     
-                                    if time_method == "プリセット時間":
-                                        # プリセット時間選択
-                                        # 現在の時刻を取得（スケジュール時刻があればそれを、なければ元の時刻を使用）
-                                        current_time_for_preset = original_datetime.time()
-                                        
-                                        preset_times = [
-                                            ("07:00 - 朝", datetime.time(7, 0)),
-                                            ("09:00 - 朝", datetime.time(9, 0)),
-                                            ("12:00 - 昼", datetime.time(12, 0)),
-                                            ("15:00 - 午後", datetime.time(15, 0)),
-                                            ("18:00 - 夕方", datetime.time(18, 0)),
-                                            ("20:00 - 夜", datetime.time(20, 0)),
-                                            ("22:00 - 夜", datetime.time(22, 0)),
-                                            ("現在の時刻", current_time_for_preset)
-                                        ]
-                                        
-                                        selected_preset = st.selectbox(
-                                            "プリセット時間を選択",
-                                            options=[opt[0] for opt in preset_times],
-                                            key=f"preset_time_{post['id']}"
+                                    with col_minute_num:
+                                        minute_input = st.number_input(
+                                            "分（0-59）",
+                                            min_value=0,
+                                            max_value=59,
+                                            value=initial_minute,
+                                            key=f"minute_input_{post['id']}",
+                                            help="0〜59分まで1分単位で自由入力"
                                         )
-                                        
-                                        send_time = next(opt[1] for opt in preset_times if opt[0] == selected_preset)
                                     
-                                    else:  # カスタム時間
-                                        col_hour, col_minute = st.columns([1, 1])
-                                        
-                                        with col_hour:
-                                            # 時間のプルダウン選択
-                                            hour_options = list(range(24))
-                                            hour_labels = [f"{h:02d}時" for h in hour_options]
-                                            
-                                            selected_hour_label = st.selectbox(
-                                                "時",
-                                                options=hour_labels,
-                                                index=original_datetime.hour,
-                                                key=f"hour_select_{post['id']}"
-                                            )
-                                            send_hour = hour_options[hour_labels.index(selected_hour_label)]
-                                        
-                                        with col_minute:
-                                            # 分の入力方法を選択
-                                            minute_method = st.radio(
-                                                "分の設定",
-                                                ["プルダウン", "自由入力"],
-                                                key=f"minute_method_{post['id']}",
-                                                horizontal=True
-                                            )
-                                            
-                                            if minute_method == "プルダウン":
-                                                minute_options = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
-                                                minute_labels = [f"{m:02d}分" for m in minute_options]
-                                                
-                                                # 現在の分に最も近いオプションを選択
-                                                closest_minute = min(minute_options, key=lambda x: abs(x - original_datetime.minute))
-                                                default_index = minute_options.index(closest_minute)
-                                                
-                                                selected_minute_label = st.selectbox(
-                                                    "分",
-                                                    options=minute_labels,
-                                                    index=default_index,
-                                                    key=f"minute_select_{post['id']}"
-                                                )
-                                                send_minute = minute_options[minute_labels.index(selected_minute_label)]
-                                            
-                                            else:  # 自由入力
-                                                send_minute = st.number_input(
-                                                    "分（0-59）",
-                                                    min_value=0,
-                                                    max_value=59,
-                                                    value=original_datetime.minute,
-                                                    key=f"minute_input_{post['id']}"
-                                                )
-                                        
-                                        send_time = datetime.time(send_hour, send_minute)
+                                    send_time = datetime.time(hour_input, minute_input)
                                     
-                                    scheduled_datetime = datetime.datetime.combine(send_date, send_time)
-                                    st.info(f"📅 {send_date.strftime('%Y-%m-%d')} {send_time.strftime('%H:%M')} で送信")
+                                else:
+                                    # プルダウン選択方式（5分刻み）
+                                    col_hour, col_minute = st.columns(2)
+                                    
+                                    with col_hour:
+                                        hour_options = list(range(24))
+                                        hour_labels = [f"{h:02d}時" for h in hour_options]
+                                        
+                                        selected_hour_label = st.selectbox(
+                                            "時",
+                                            options=hour_labels,
+                                            index=initial_hour,
+                                            key=f"hour_select_{post['id']}"
+                                        )
+                                        selected_hour = hour_options[hour_labels.index(selected_hour_label)]
+                                    
+                                    with col_minute:
+                                        minute_options = list(range(0, 60, 5))  # 5分刻み
+                                        minute_labels = [f"{m:02d}分" for m in minute_options]
+                                        
+                                        # 初期分に最も近い5分刻みを選択
+                                        closest_minute = min(minute_options, key=lambda x: abs(x - initial_minute))
+                                        default_minute_index = minute_options.index(closest_minute)
+                                        
+                                        selected_minute_label = st.selectbox(
+                                            "分",
+                                            options=minute_labels,
+                                            index=default_minute_index,
+                                            key=f"minute_select_{post['id']}"
+                                        )
+                                        selected_minute = minute_options[minute_labels.index(selected_minute_label)]
+                                    
+                                    # プルダウン選択から時刻を構成
+                                    send_time = datetime.time(selected_hour, selected_minute)
+                                
+                                # 設定された日時を表示
+                                scheduled_datetime = datetime.datetime.combine(send_date, send_time)
+                                
+                                # 現在時刻との比較表示
+                                current_time = datetime.datetime.now()
+                                if scheduled_datetime > current_time:
+                                    time_diff = scheduled_datetime - current_time
+                                    hours = int(time_diff.total_seconds() // 3600)
+                                    minutes = int((time_diff.total_seconds() % 3600) // 60)
+                                    
+                                    if hours > 0:
+                                        diff_text = f"（{hours}時間{minutes}分後）"
+                                    else:
+                                        diff_text = f"（{minutes}分後）"
+                                    
+                                    st.info(f"📅 {scheduled_datetime.strftime('%Y-%m-%d %H:%M')} に送信予定 {diff_text}")
+                                else:
+                                    st.warning(f"⚠️ {scheduled_datetime.strftime('%Y-%m-%d %H:%M')} - 過去の時刻です（即座に送信されます）")
+                                
+                                # 時刻保存ボタン
+                                if st.button("💾 時刻を保存", key=f"save_time_{post['id']}", use_container_width=True):
+                                    try:
+                                        # 時刻のみ保存（スケジュール実行はしない）
+                                        scheduled_at_str = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query("UPDATE posts SET scheduled_at = ? WHERE id = ?", 
+                                                    (scheduled_at_str, post['id']))
+                                        st.success(f"✅ 投稿時刻を {scheduled_datetime.strftime('%m-%d %H:%M')} に保存しました（送信ボタンで実行）")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ 時刻保存エラー: {str(e)}")
                             
                             with col_action:
+                                # データベースカラム確認用デバッグ（一時的）
+                                if st.button("🔍 DB構造確認", key=f"debug_db_{post['id']}", use_container_width=True):
+                                    try:
+                                        # postsテーブルの構造を確認
+                                        table_info = execute_query("PRAGMA table_info(posts)", fetch="all")
+                                        st.write("📊 postsテーブル構造:")
+                                        for col in table_info:
+                                            st.caption(f"- {col['name']}: {col['type']}")
+                                        
+                                        # 現在の投稿データを確認
+                                        current_post = execute_query("SELECT * FROM posts WHERE id = ?", (post['id'],), fetch="one")
+                                        st.write("📋 現在の投稿データ:")
+                                        for key in current_post.keys():
+                                            value = current_post[key]
+                                            st.caption(f"- {key}: {value}")
+                                            
+                                    except Exception as e:
+                                        st.error(f"DB確認エラー: {str(e)}")
+                                
+                                # 画像添付エリア
+                                st.caption("📸 画像添付")
+                                
+                                # 現在添付されている画像を表示
+                                current_images = []
+                                if 'image_paths' in post and post['image_paths']:
+                                    try:
+                                        import json
+                                        current_images = json.loads(post['image_paths'])
+                                    except:
+                                        current_images = []
+                                
+                                # デバッグ情報
+                                if 'image_paths' in post and post['image_paths']:
+                                    st.caption(f"🔍 DB画像データ: {post['image_paths'][:50]}...")
+                                    try:
+                                        import json
+                                        debug_images = json.loads(post['image_paths'])
+                                        st.caption(f"🔍 解析結果: {len(debug_images)}個 - {debug_images}")
+                                    except Exception as e:
+                                        st.caption(f"🔍 JSON解析エラー: {str(e)}")
+                                else:
+                                    st.caption("🔍 DB画像データ: なし")
+                                
+                                if current_images:
+                                    st.caption(f"📷 添付済み: {len(current_images)}枚")
+                                    # 画像プレビュー（ローカルファイルとURLの両方に対応）
+                                    for i, img_path in enumerate(current_images[:2]):  # 最大2枚までプレビュー
+                                        if img_path.startswith('http'):
+                                            # Google Drive URLの場合
+                                            try:
+                                                st.image(img_path, width=60, caption=f"URL画像{i+1}")
+                                            except:
+                                                st.caption(f"URL画像{i+1}: {img_path[:30]}...")
+                                        elif os.path.exists(img_path):
+                                            # ローカルファイルの場合
+                                            st.image(img_path, width=60, caption=f"画像{i+1}")
+                                        else:
+                                            st.caption(f"画像{i+1}: ファイルが見つかりません")
+                                
+                                # 画像アップロード
+                                image_input_method = st.radio(
+                                    "画像入力方法",
+                                    ["📁 ファイルアップロード", "🔗 Google Drive URL"],
+                                    key=f"image_method_{post['id']}",
+                                    horizontal=True
+                                )
+                                
+                                uploaded_images = None
+                                google_drive_urls = []
+                                
+                                if image_input_method == "📁 ファイルアップロード":
+                                    uploaded_images = st.file_uploader(
+                                        "画像を選択",
+                                        type=['jpg', 'jpeg', 'png', 'gif', 'webp'],
+                                        accept_multiple_files=True,
+                                        key=f"images_{post['id']}",
+                                        help="最大4枚まで"
+                                    )
+                                else:
+                                    # Google Drive URL入力
+                                    st.caption("🔗 Google Drive URL入力（最大4つ）")
+                                    for i in range(4):
+                                        url = st.text_input(
+                                            f"Google Drive URL {i+1}",
+                                            placeholder="https://drive.google.com/file/d/FILE_ID/view?usp=sharing",
+                                            key=f"gdrive_url_{post['id']}_{i}",
+                                            help="Google Drive共有URL"
+                                        )
+                                        if url.strip():
+                                            google_drive_urls.append(url.strip())
+                                    
+                                    if google_drive_urls:
+                                        st.caption(f"🔗 入力済みURL: {len(google_drive_urls)}個")
+                                        for i, url in enumerate(google_drive_urls):
+                                            converted_url = convert_google_drive_url(url)
+                                            st.caption(f"{i+1}. {url[:50]}{'...' if len(url) > 50 else ''}")
+                                            # URL形式のプレビューを表示
+                                            try:
+                                                st.image(converted_url, width=60, caption=f"URL画像{i+1}")
+                                            except:
+                                                st.caption("  → 画像プレビューできません")
+                                
+                                # 画像保存処理
+                                if uploaded_images or google_drive_urls:
+                                    # ファイルアップロードのチェック
+                                    if uploaded_images and len(uploaded_images) > 4:
+                                        st.warning("⚠️ 最大4枚まで")
+                                        uploaded_images = uploaded_images[:4]
+                                    
+                                    # Google Drive URLのチェック
+                                    if google_drive_urls and len(google_drive_urls) > 4:
+                                        st.warning("⚠️ 最大4つのURLまで")
+                                        google_drive_urls = google_drive_urls[:4]
+                                    
+                                    if st.button("💾 画像保存", key=f"save_images_{post['id']}", use_container_width=True):
+                                        st.info("🔄 保存処理を開始します...")
+                                        try:
+                                            saved_paths = []
+                                            
+                                            if uploaded_images:
+                                                st.info(f"📁 ファイルアップロード処理: {len(uploaded_images)}枚")
+                                                # ファイルアップロードの処理
+                                                image_dir = f"post_images/{post['id']}"
+                                                os.makedirs(image_dir, exist_ok=True)
+                                                st.info(f"📂 ディレクトリ作成: {image_dir}")
+                                                
+                                                # 既存の画像ファイルを削除
+                                                if current_images:
+                                                    st.info(f"🗑️ 既存画像削除: {len(current_images)}個")
+                                                    for old_path in current_images:
+                                                        try:
+                                                            if os.path.exists(old_path):
+                                                                os.remove(old_path)
+                                                                st.info(f"✅ 削除完了: {old_path}")
+                                                        except Exception as e:
+                                                            st.warning(f"⚠️ 削除失敗: {old_path} - {str(e)}")
+                                                
+                                                # 新しい画像を保存
+                                                for i, img in enumerate(uploaded_images):
+                                                    file_extension = img.name.split('.')[-1].lower()
+                                                    file_path = f"{image_dir}/image_{i+1}.{file_extension}"
+                                                    st.info(f"💾 保存中: {file_path}")
+                                                    
+                                                    with open(file_path, "wb") as f:
+                                                        f.write(img.getvalue())
+                                                    saved_paths.append(file_path)
+                                                    st.info(f"✅ 保存完了: {file_path}")
+                                            
+                                            elif google_drive_urls:
+                                                st.info(f"🔗 Google Drive URL処理: {len(google_drive_urls)}個")
+                                                # Google Drive URLの処理（URLを直接保存）
+                                                for i, url in enumerate(google_drive_urls):
+                                                    converted_url = convert_google_drive_url(url)
+                                                    saved_paths.append(converted_url)
+                                                    st.info(f"🔗 URL変換: {url[:50]}... → {converted_url[:50]}...")
+                                            
+                                            # データベースに保存
+                                            import json
+                                            image_paths_json = json.dumps(saved_paths)
+                                            st.info(f"💾 DB保存データ: {image_paths_json}")
+                                            st.info(f"💾 投稿ID: {post['id']}")
+                                            st.info(f"💾 保存パス数: {len(saved_paths)}")
+                                            
+                                            # 保存前の状態確認
+                                            before_save = execute_query("SELECT image_paths, has_images FROM posts WHERE id = ?", (post['id'],), fetch="one")
+                                            st.info(f"📊 保存前: image_paths={before_save['image_paths']}, has_images={before_save['has_images']}")
+                                            
+                                            # データベース更新を実行
+                                            result = execute_query("UPDATE posts SET image_paths = ?, has_images = ? WHERE id = ?", 
+                                                        (image_paths_json, 1, post['id']))
+                                            st.info(f"💾 DB更新実行完了")
+                                            
+                                            # 保存確認
+                                            verification = execute_query("SELECT image_paths, has_images FROM posts WHERE id = ?", (post['id'],), fetch="one")
+                                            st.info(f"✅ DB確認: image_paths={verification['image_paths']}, has_images={verification['has_images']}")
+                                            
+                                            # 実際の値の比較
+                                            if verification['image_paths'] == image_paths_json:
+                                                st.success("🎉 データベース保存成功！")
+                                            else:
+                                                st.error(f"❌ データベース保存失敗！期待値: {image_paths_json}, 実際値: {verification['image_paths']}")
+                                            
+                                            if uploaded_images:
+                                                st.success(f"✅ {len(saved_paths)}枚の画像ファイルを保存しました")
+                                            else:
+                                                st.success(f"✅ {len(saved_paths)}個のGoogle Drive URLを保存しました")
+                                            
+                                            st.info("🔄 画面を更新しています...")
+                                            time.sleep(3)  # デバッグ情報を確認する時間
+                                            st.rerun()
+                                            
+                                        except Exception as e:
+                                            st.error(f"❌ 画像保存エラー: {str(e)}")
+                                            import traceback
+                                            st.code(traceback.format_exc())
+                                
+                                # 画像削除ボタン
+                                if current_images:
+                                    if st.button("🗑️ 画像削除", key=f"delete_images_{post['id']}", use_container_width=True):
+                                        try:
+                                            # ローカル画像ファイルのみ削除（URLは削除不要）
+                                            for img_path in current_images:
+                                                try:
+                                                    if not img_path.startswith('http') and os.path.exists(img_path):
+                                                        os.remove(img_path)
+                                                except:
+                                                    pass
+                                            
+                                            # データベースから削除
+                                            execute_query("UPDATE posts SET image_paths = NULL, has_images = 0 WHERE id = ?", (post['id'],))
+                                            st.success("✅ 画像を削除しました")
+                                            st.rerun()
+                                            
+                                        except Exception as e:
+                                            st.error(f"❌ 画像削除エラー: {str(e)}")
+                                
+                                st.markdown("---")
+                                
                                 # 送信先選択
                                 destination_options = [
                                     ("📊 Google Sheets", "google_sheets"),
@@ -3519,9 +3791,13 @@ def main():
                                     ("📊🐦 両方に送信", "both")
                                 ]
                                 
+                                # 初期値をX (Twitter)に設定
+                                default_destination_index = 1  # "🐦 X (Twitter)" のインデックス
+                                
                                 selected_destination = st.selectbox(
                                     "送信先",
                                     options=[opt[0] for opt in destination_options],
+                                    index=default_destination_index,
                                     key=f"destination_{post['id']}"
                                 )
                                 
@@ -3536,60 +3812,34 @@ def main():
                                     cast_name_only = current_cast['name'] if current_cast else selected_cast_name
                                     cast_id = current_cast['id'] if current_cast else None
                                     
-                                    # 投稿実行時に最新のscheduled_datetimeを再取得
-                                    time_option_key = f"time_option_{post['id']}"
-                                    if time_option_key in st.session_state:
-                                        current_option = st.session_state[time_option_key]
-                                        
-                                        if current_option == "元の投稿時刻を使用":
-                                            final_scheduled_datetime = original_datetime
-                                        else:
-                                            # カスタム設定の値を取得
-                                            date_key = f"date_{post['id']}"
-                                            final_send_date = st.session_state.get(date_key, datetime.date.today())
-                                            
-                                            time_method_key = f"time_method_{post['id']}"
-                                            current_time_method = st.session_state.get(time_method_key, "プリセット時間")
-                                            
-                                            if current_time_method == "プリセット時間":
-                                                preset_key = f"preset_time_{post['id']}"
-                                                preset_selection = st.session_state.get(preset_key, "07:00 - 朝")
-                                                
-                                                preset_times = [
-                                                    ("07:00 - 朝", datetime.time(7, 0)),
-                                                    ("09:00 - 朝", datetime.time(9, 0)),
-                                                    ("12:00 - 昼", datetime.time(12, 0)),
-                                                    ("15:00 - 午後", datetime.time(15, 0)),
-                                                    ("18:00 - 夕方", datetime.time(18, 0)),
-                                                    ("20:00 - 夜", datetime.time(20, 0)),
-                                                    ("22:00 - 夜", datetime.time(22, 0)),
-                                                    ("現在の時刻", original_datetime.time())
-                                                ]
-                                                final_send_time = next((opt[1] for opt in preset_times if opt[0] == preset_selection), datetime.time(12, 0))
-                                            
-                                            else:  # カスタム時間
-                                                hour_key = f"hour_select_{post['id']}"
-                                                final_hour = st.session_state.get(hour_key, "12時")
-                                                final_hour_num = int(final_hour.replace("時", ""))
-                                                
-                                                minute_method_key = f"minute_method_{post['id']}"
-                                                minute_method = st.session_state.get(minute_method_key, "プルダウン")
-                                                
-                                                if minute_method == "プルダウン":
-                                                    minute_key = f"minute_select_{post['id']}"
-                                                    final_minute_str = st.session_state.get(minute_key, "00分")
-                                                    final_minute = int(final_minute_str.replace("分", ""))
-                                                else:
-                                                    minute_input_key = f"minute_input_{post['id']}"
-                                                    final_minute = st.session_state.get(minute_input_key, 0)
-                                                
-                                                final_send_time = datetime.time(final_hour_num, final_minute)
-                                            
-                                            final_scheduled_datetime = datetime.datetime.combine(final_send_date, final_send_time)
-                                    
+                                    # 改善された時刻取得：保存済み時刻を優先、UIで設定された時刻を次に使用
+                                    if post['scheduled_at'] and post['sent_status'] != 'scheduled':
+                                        # 保存済みの時刻がある場合（まだスケジュール実行されていない）
+                                        saved_datetime = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
+                                        final_scheduled_datetime = saved_datetime
+                                        st.info(f"📅 保存済みの時刻 {saved_datetime.strftime('%Y-%m-%d %H:%M')} を使用して送信します")
                                     else:
-                                        # フォールバック: scheduled_datetimeをそのまま使用
-                                        final_scheduled_datetime = scheduled_datetime
+                                        # UIで設定された時刻を使用
+                                        send_date = st.session_state.get(f"simple_date_{post['id']}", scheduled_datetime.date())
+                                        
+                                        # 時刻入力方法を確認
+                                        time_method = st.session_state.get(f"time_method_{post['id']}", "🔢 数値入力（1分単位）")
+                                        
+                                        if time_method == "🔢 数値入力（1分単位）":
+                                            # 数値入力から取得
+                                            hour_input = st.session_state.get(f"hour_input_{post['id']}", scheduled_datetime.hour)
+                                            minute_input = st.session_state.get(f"minute_input_{post['id']}", scheduled_datetime.minute)
+                                            send_time = datetime.time(hour_input, minute_input)
+                                        else:
+                                            # プルダウン選択から取得
+                                            selected_hour_label = st.session_state.get(f"hour_select_{post['id']}", "12時")
+                                            selected_minute_label = st.session_state.get(f"minute_select_{post['id']}", "00分")
+                                            
+                                            selected_hour = int(selected_hour_label.replace("時", ""))
+                                            selected_minute = int(selected_minute_label.replace("分", ""))
+                                            send_time = datetime.time(selected_hour, selected_minute)
+                                        
+                                        final_scheduled_datetime = datetime.datetime.combine(send_date, send_time)
                                     
                                     # 未来の投稿かどうかをチェック（タイムゾーンを統一）
                                     current_time = datetime.datetime.now(JST)
@@ -3605,10 +3855,19 @@ def main():
                                         scheduled_at_str = final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
                                         execute_query("UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?", 
                                                     (scheduled_at_str, post['id']))
-                                        st.session_state.page_status_message = ("success", f"📅 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} にスケジュール投稿を設定しました")
+                                        st.session_state.page_status_message = ("success", f"📅 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} にスケジュール投稿を設定しました。スケジュール投稿タブで管理できます。")
                                     else:
-                                        # 即座投稿：従来通りの処理
-                                        success, message = send_post_to_destination(cast_name_only, post['content'], final_scheduled_datetime, destination_value, cast_id)
+                                        # 投稿に添付された画像を取得
+                                        image_paths = []
+                                        if 'image_paths' in post and post['image_paths']:
+                                            try:
+                                                import json
+                                                image_paths = json.loads(post['image_paths'])
+                                            except:
+                                                image_paths = []
+                                        
+                                        # 即座投稿：従来通りの処理（画像も送信）
+                                        success, message = send_post_to_destination(cast_name_only, post['content'], final_scheduled_datetime, destination_value, cast_id, image_paths=image_paths)
                                         
                                         if success:
                                             # 送信成功時のデータベース更新
@@ -3722,6 +3981,65 @@ def main():
                     
                     with col1:
                         st.subheader(f"⏳ 待機中 ({len(pending_posts)}件)")
+                        
+                        # 手動実行ボタンを追加
+                        if st.button("🚀 期限切れ投稿を手動実行", key="manual_execute_all"):
+                            manual_executed = 0
+                            for post in pending_posts:
+                                scheduled_at = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
+                                current_time = datetime.datetime.now()
+                                
+                                if scheduled_at <= current_time:
+                                    try:
+                                        # 投稿実行
+                                        cast_name = execute_query("SELECT name FROM casts WHERE id = ?", (post['cast_id'],), fetch="one")['name']
+                                        
+                                        # 画像データを取得
+                                        image_paths = []
+                                        if 'image_paths' in post and post['image_paths']:
+                                            try:
+                                                import json
+                                                image_paths = json.loads(post['image_paths'])
+                                            except:
+                                                image_paths = []
+                                        
+                                        # 送信先を取得（デフォルトはX）
+                                        destination = "x_api"
+                                        
+                                        # 投稿実行
+                                        success, message = send_post_to_destination(
+                                            cast_name, 
+                                            post['content'], 
+                                            scheduled_at, 
+                                            destination, 
+                                            post['cast_id'], 
+                                            image_paths=image_paths
+                                        )
+                                        
+                                        if success:
+                                            # 送信成功時のデータベース更新
+                                            sent_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                            execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", 
+                                                        (sent_at, post['id']))
+                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
+                                                        (post['id'], destination, sent_at, scheduled_at.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
+                                            manual_executed += 1
+                                            st.success(f"✅ 投稿ID {post['id']} を実行しました: {message}")
+                                        else:
+                                            # 送信失敗時のログ記録
+                                            failed_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
+                                                        (post['id'], destination, failed_at, scheduled_at.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
+                                            st.error(f"❌ 投稿ID {post['id']} の実行に失敗: {message}")
+                                            
+                                    except Exception as e:
+                                        st.error(f"❌ 投稿ID {post['id']} の実行エラー: {str(e)}")
+                            
+                            if manual_executed > 0:
+                                st.success(f"🎉 {manual_executed}件の投稿を手動実行しました")
+                                time.sleep(2)
+                                st.rerun()
+                        
                         if pending_posts:
                             for post in pending_posts:
                                 with st.container():
@@ -3731,12 +4049,84 @@ def main():
                                     # 実行予定時刻との比較
                                     if scheduled_at <= current_time:
                                         time_status = f"🚨 実行予定時刻経過: {scheduled_at.strftime('%m-%d %H:%M')}"
-                                        st.warning(post['content'][:100] + "...")
+                                        time_diff = current_time - scheduled_at
+                                        st.warning(f"{post['content'][:100]}...")
+                                        st.caption(f"⏰ {time_diff.total_seconds()/60:.0f}分前に実行予定でした")
                                     else:
                                         time_status = f"📅 実行予定: {scheduled_at.strftime('%m-%d %H:%M')}"
-                                        st.info(post['content'][:100] + "...")
+                                        time_diff = scheduled_at - current_time
+                                        st.info(f"{post['content'][:100]}...")
+                                        st.caption(f"⏰ あと{time_diff.total_seconds()/60:.0f}分で実行予定")
+                                    
+                                    # デバッグ情報
+                                    st.caption(f"🔍 投稿ID: {post['id']}, 状態: {post['sent_status']}, キャストID: {post['cast_id']}")
+                                    
+                                    # 送信履歴を確認
+                                    send_history = execute_query("SELECT * FROM send_history WHERE post_id = ? ORDER BY id DESC LIMIT 3", (post['id'],), fetch="all")
+                                    if send_history:
+                                        st.caption("📋 送信履歴:")
+                                        for h in send_history:
+                                            sent_at = h['sent_at'] if 'sent_at' in h and h['sent_at'] else 'N/A'
+                                            scheduled_datetime = h['scheduled_datetime'] if 'scheduled_datetime' in h and h['scheduled_datetime'] else 'N/A'
+                                            error_message = h['error_message'] if 'error_message' in h and h['error_message'] else ''
+                                            st.caption(f"  - {h['status']}: {sent_at or scheduled_datetime} ({error_message})")
+                                    
+                                    # 画像表示の追加
+                                    if 'image_paths' in post and post['image_paths']:
+                                        try:
+                                            import json
+                                            current_images = json.loads(post['image_paths'])
+                                            if current_images:
+                                                st.caption(f"📷 添付画像: {len(current_images)}枚")
+                                                # デバッグ情報を表示
+                                                st.caption(f"🔍 画像データ: {post['image_paths'][:100]}...")
+                                                # 画像プレビュー（小さく表示）
+                                                img_cols = st.columns(min(len(current_images), 3))  # 最大3列
+                                                for i, img_path in enumerate(current_images[:3]):  # 最大3枚まで表示
+                                                    with img_cols[i]:
+                                                        if img_path.startswith('http'):
+                                                            # Google Drive URLの場合
+                                                            try:
+                                                                st.image(img_path, width=80, caption=f"URL画像{i+1}")
+                                                            except:
+                                                                st.caption(f"URL{i+1}: {img_path[:20]}...")
+                                                        elif os.path.exists(img_path):
+                                                            # ローカルファイルの場合
+                                                            st.image(img_path, width=80, caption=f"画像{i+1}")
+                                                        else:
+                                                            st.caption(f"画像{i+1}: ファイルなし")
+                                        except Exception as e:
+                                            st.caption(f"⚠️ 画像データエラー: {str(e)}")
                                     
                                     st.caption(time_status)
+                                    
+                                    # 承認済みに戻すボタンを追加
+                                    col_btn1, col_btn2 = st.columns([1, 1])
+                                    with col_btn1:
+                                        if st.button(f"↩️ 承認済みに戻す", key=f"revert_schedule_{post['id']}", use_container_width=True):
+                                            try:
+                                                # 予約時刻を保持しつつ、スケジュール実行のみ解除
+                                                # scheduled_at は保持、sent_status のみリセット
+                                                execute_query("UPDATE posts SET sent_status = 'not_sent' WHERE id = ?", (post['id'],))
+                                                
+                                                # デバッグ情報：更新後の状態を確認
+                                                updated_post = execute_query("SELECT posted_at, created_at, scheduled_at, sent_status FROM posts WHERE id = ?", (post['id'],), fetch="one")
+                                                print(f"🔄 投稿ID {post['id']} を承認済みに戻しました")
+                                                print(f"   承認時間: {updated_post['posted_at']}")
+                                                print(f"   作成時間: {updated_post['created_at']}")
+                                                print(f"   予約時刻: {updated_post['scheduled_at']} (保持)")
+                                                print(f"   送信状態: {updated_post['sent_status']}")
+                                                
+                                                st.success("✅ 承認済み一覧に戻しました（予約時刻を保持）")
+                                                time.sleep(1)
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"❌ エラー: {str(e)}")
+                                    
+                                    with col_btn2:
+                                        # 既存の機能があればここに配置（例：削除ボタンなど）
+                                        pass
+                                    
                                     st.markdown("---")
                         else:
                             st.info("待機中のスケジュール投稿はありません")
@@ -3750,6 +4140,30 @@ def main():
                                     sent_at = post['sent_at']
                                     
                                     st.success(post['content'][:100] + "...")
+                                    
+                                    # 画像表示の追加
+                                    if 'image_paths' in post and post['image_paths']:
+                                        try:
+                                            import json
+                                            current_images = json.loads(post['image_paths'])
+                                            if current_images:
+                                                st.caption(f"📷 送信済み画像: {len(current_images)}枚")
+                                                # 画像プレビュー（小さく表示）
+                                                img_cols = st.columns(min(len(current_images), 3))  # 最大3列
+                                                for i, img_path in enumerate(current_images[:3]):  # 最大3枚まで表示
+                                                    with img_cols[i]:
+                                                        if img_path.startswith('http'):
+                                                            # Google Drive URLの場合
+                                                            try:
+                                                                st.image(img_path, width=60, caption=f"URL画像{i+1}")
+                                                            except:
+                                                                st.caption(f"URL{i+1}")
+                                                        elif os.path.exists(img_path):
+                                                            # ローカルファイルの場合
+                                                            st.image(img_path, width=60, caption=f"画像{i+1}")
+                                        except:
+                                            pass
+                                    
                                     st.caption(f"📅 予定: {scheduled_at.strftime('%m-%d %H:%M')} | ✅ 実行: {sent_at}")
                                     st.markdown("---")
                             
@@ -3760,6 +4174,39 @@ def main():
                 
                 else:
                     st.info("スケジュール投稿はまだありません。")
+                
+                # スケジュール実行ログの表示
+                st.markdown("### 📊 スケジュール実行ログ")
+                
+                # 最近の送信履歴を表示
+                recent_logs = execute_query("""
+                    SELECT sh.*, p.content, c.name as cast_name 
+                    FROM send_history sh 
+                    LEFT JOIN posts p ON sh.post_id = p.id 
+                    LEFT JOIN casts c ON p.cast_id = c.id 
+                    WHERE sh.scheduled_datetime IS NOT NULL 
+                    ORDER BY sh.id DESC 
+                    LIMIT 10
+                """, fetch="all")
+                
+                if recent_logs:
+                    for log in recent_logs:
+                        sent_at = log['sent_at'] if 'sent_at' in log and log['sent_at'] else 'N/A'
+                        scheduled_datetime = log['scheduled_datetime'] if 'scheduled_datetime' in log and log['scheduled_datetime'] else 'N/A'
+                        cast_name = log['cast_name'] if 'cast_name' in log and log['cast_name'] else 'Unknown'
+                        content = log['content'] if 'content' in log and log['content'] else 'No content'
+                        error_message = log['error_message'] if 'error_message' in log and log['error_message'] else None
+                        
+                        with st.expander(f"📝 {cast_name} - {log['status']} - {sent_at or scheduled_datetime}"):
+                            st.write(f"**投稿内容**: {content[:100]}...")
+                            st.write(f"**送信先**: {log['destination']}")
+                            st.write(f"**予定時刻**: {scheduled_datetime}")
+                            st.write(f"**実行時刻**: {sent_at}")
+                            st.write(f"**状態**: {log['status']}")
+                            if error_message:
+                                st.error(f"**エラー**: {error_message}")
+                else:
+                    st.info("スケジュール実行ログはありません。")
                 
                 # スケジュール投稿の説明
                 st.markdown("---")

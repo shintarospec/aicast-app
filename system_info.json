@@ -1,0 +1,30 @@
+{
+  "timestamp": "20251006_051126",
+  "system": {
+    "platform": [
+      "Linux",
+      "codespaces-1b264e",
+      "6.8.0-1030-azure",
+      "#35~22.04.1-Ubuntu SMP Mon May 26 18:08:30 UTC 2025",
+      "x86_64"
+    ],
+    "python_version": "3.12.1 (main, Jul 10 2025, 11:57:50) [GCC 13.3.0]",
+    "working_directory": "/workspaces/aicast-app"
+  },
+  "git_info": {
+    "commit": "155784e3991d",
+    "branch": "oauth-authentication-clean",
+    "status": "modified"
+  },
+  "application": {
+    "app_py_lines": 6466,
+    "database_size": 409600,
+    "docs_count": 29
+  },
+  "incident_recovery": {
+    "mcf_death_guard_status": "terminated",
+    "secret_manager_status": "disabled",
+    "github_security_bypass": "active",
+    "recovery_date": "2025-10-05"
+  }
+}
