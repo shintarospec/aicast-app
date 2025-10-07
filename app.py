@@ -3102,11 +3102,13 @@ def main():
                                         response = safe_generate_content(st.session_state.gemini_model, improvement_prompt)
                                         improved_content = clean_generated_content(response.text)
                                         
-                                        # チューニング履歴に記録
+                                        # チューニング履歴に記録（個別チューニングと同じ形式で比較表示）
                                         timestamp = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
                                         combined_advice = ",".join(selected_advice) if selected_advice else ""
+                                        # 前回の投稿と新しい投稿の比較形式で保存
+                                        comparison_content = f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{original_post['content']}</span>\n\n**新しい投稿:**\n{improved_content}"
                                         execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
-                                                    (post_id, timestamp, original_post['content'], instructions_text))
+                                                    (post_id, timestamp, comparison_content, instructions_text))
                                         
                                         # 投稿内容を更新
                                         execute_query("UPDATE posts SET content = ?, advice = ?, free_advice = ? WHERE id = ?", 
