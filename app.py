@@ -2368,7 +2368,16 @@ def main():
                 clear_editing_post(); st.rerun()
 
             st.caption(f"作成日時: {post['created_at']} | テーマ: {post['theme']}")
-            st.text_area("投稿内容", value=post['content'], height=150, key=f"content_{post_id}")
+            
+            # ウィジェットとデータベースの内容を同期
+            if f"content_{post_id}" not in st.session_state:
+                st.session_state[f"content_{post_id}"] = post['content']
+            
+            # データベースの内容とウィジェットの内容を同期
+            if st.session_state.get(f"content_{post_id}") != post['content']:
+                st.session_state[f"content_{post_id}"] = post['content']
+            
+            st.text_area("投稿内容", height=150, key=f"content_{post_id}")
             eval_options = ['未評価', '◎', '◯', '△', '✕']; current_eval = post['evaluation'] if post['evaluation'] in eval_options else '未評価'
             st.selectbox("評価", eval_options, index=eval_options.index(current_eval), key=f"eval_{post_id}")
 
@@ -2412,6 +2421,13 @@ def main():
                             execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
                                       (post_id, history_ts, f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{post['content']}</span>\n\n**新しい投稿:**\n{clean_generated_content(response.text)}", final_advice_str))
                             execute_query("UPDATE posts SET content = ?, evaluation = '未評価', advice = '', free_advice = '' WHERE id = ?", (clean_generated_content(response.text), post_id))
+                            
+                            # デバッグ情報
+                            print(f"🔄 投稿ID {post_id}: ウィジェット値を更新: {clean_generated_content(response.text)[:50]}...")
+                            
+                            # ウィジェットのセッション状態を強制更新
+                            st.session_state[f"content_{post_id}"] = clean_generated_content(response.text)
+                            
                             # --- 再生成後にウィジェットのセッションキーを削除して初期化 ---
                             for k in [f"advice_{post_id}", f"free_advice_{post_id}", f"regen_char_limit_{post_id}"]:
                                 if k in st.session_state:
