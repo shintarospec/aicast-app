@@ -5,7 +5,7 @@
 
 ## 📋 概要
 
-本文書は、2025年10月7日〜8日に実施されたAIcast Roomの機能追加・改修内容をまとめた仕様書です。主要な修正として、以下の11の機能を実装しました：
+本文書は、2025年10月7日〜8日に実施されたAIcast Roomの機能追加・改修内容をまとめた仕様書です。主要な修正として、以下の13の機能を実装しました：
 
 1. **安全な日時パース処理** - エラー回避とデータ整合性確保
 2. **データベース不整合修正** - posted_atフィールドの正規化
@@ -18,6 +18,8 @@
 9. **一括承認時の投稿時刻保持** - 設定済み時刻の維持とユーザビリティ向上
 10. **個別承認機能の統一化** - 一括承認と同様のJST日付+時刻保持ロジック実装
 11. **承認済み投稿表示の改善** - 「承認日: YYYY-MM-DD」形式での簡潔表示
+12. **一括チューニング機能の復活** - インデントエラー修正による機能表示の復旧
+13. **一括チューニング比較表示の統一** - 個別チューニングと同様のbefore/after表示実装
 
 これらの改修により、スケジュール投稿機能の安定化とユーザビリティの大幅向上を実現しました。
 
@@ -656,6 +658,122 @@ st.caption(f"🕐 生成時刻: {scheduled_display} | 承認日: {approval_date_
 
 ---
 
+### 12. 一括チューニング機能の復活（2025年10月8日追加）
+
+#### **問題背景**
+- 投稿案一覧タブの一括チューニング機能が表示されなくなっていた
+- `advice_master`テーブルにデータが存在する場合、UIコンポーネントが非表示になる問題
+- インデントエラーにより、アドバイス選択・カスタム指示入力・一括チューニングボタンが条件分岐内に埋もれていた
+
+#### **実装内容**
+```python
+# 修正前（問題のあったコード）
+if len(advice_list) == 0:
+    st.warning("⚠️ アドバイスマスターにデータがありません。")
+    # デフォルトアドバイス追加処理
+    
+    selected_advice = st.multiselect(...)  # ❌ if文の中にあるため表示されない
+    custom_advice = st.text_area(...)      # ❌ if文の中にあるため表示されない
+    if st.button("一括チューニング"):      # ❌ if文の中にあるため表示されない
+
+# 修正後（正常なコード）
+if len(advice_list) == 0:
+    st.warning("⚠️ アドバイスマスターにデータがありません。")
+    # デフォルトアドバイス追加処理
+
+# アドバイス選択UI（advice_listの有無に関わらず表示）
+selected_advice = st.multiselect(
+    "改善アドバイスを選択",
+    advice_list,
+    key="bulk_advice_select"
+)
+
+custom_advice = st.text_area(
+    "カスタム改善指示（任意）",
+    placeholder="具体的な改善指示を入力...",
+    key="bulk_custom_advice"
+)
+
+if st.button("選択した投稿を一括チューニング（AI改善）", type="primary", use_container_width=True):
+```
+
+#### **修正内容**
+- **UIコンポーネントの移動**: アドバイス選択とカスタム指示入力を条件分岐の外に配置
+- **インデント修正**: 一括チューニングボタンとその処理を正しいレベルに修正
+- **try-except構造の改善**: エラーハンドリングを適切に配置
+- **advice_master依存の解消**: アドバイスマスターの有無に関わらず機能が利用可能
+
+#### **機能特徴**
+- **アドバイス選択**: 既存のアドバイスマスターから複数選択可能
+- **カスタム指示**: 自由記述での改善指示入力
+- **プログレスバー**: 改善処理の進捗を視覚的に表示
+- **エラーハンドリング**: 投稿ごとの個別エラー処理で安全性確保
+- **API制限対策**: 処理間隔調整によるVertex AI API制限回避
+
+#### **効果**
+- **機能復活**: 一括チューニング機能が正常に表示・動作
+- **効率化**: 複数投稿の同時改善処理による作業効率向上
+- **柔軟性**: アドバイス選択とカスタム指示の組み合わせ利用
+
+---
+
+### 13. 一括チューニング比較表示の統一（2025年10月8日追加）
+
+#### **問題背景**
+- 一括チューニング実行時に「前回の投稿」と「新しい投稿」の比較表示が出ない
+- 個別チューニングでは比較表示があるが、一括チューニングでは元投稿のみ保存
+- チューニング履歴での視認性が個別チューニングと比べて劣っていた
+
+#### **修正前の問題**
+```python
+# 一括チューニング（修正前）
+execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
+            (post_id, timestamp, original_post['content'], instructions_text))
+# ❌ 元の投稿内容のみ保存、比較表示なし
+
+# 個別チューニング（参考）
+comparison_content = f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{post['content']}</span>\n\n**新しい投稿:**\n{clean_generated_content(response.text)}"
+execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
+            (post_id, history_ts, comparison_content, final_advice_str))
+# ✅ 比較表示形式で保存
+```
+
+#### **実装内容**
+```python
+# 一括チューニング（修正後）
+# チューニング履歴に記録（個別チューニングと同じ形式で比較表示）
+timestamp = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+combined_advice = ",".join(selected_advice) if selected_advice else ""
+# 前回の投稿と新しい投稿の比較形式で保存
+comparison_content = f"<span style='color: #888888'>前回の投稿:</span>\n<span style='color: #888888'>{original_post['content']}</span>\n\n**新しい投稿:**\n{improved_content}"
+execute_query("INSERT INTO tuning_history (post_id, timestamp, previous_content, advice_used) VALUES (?, ?, ?, ?)", 
+            (post_id, timestamp, comparison_content, instructions_text))
+```
+
+#### **表示改善**
+- **修正前**: 元の投稿内容のみ
+- **修正後**: 
+  ```
+  前回の投稿: [グレー表示]
+  元の投稿内容
+  
+  **新しい投稿:**
+  改善された投稿内容
+  ```
+
+#### **特徴**
+- **HTMLタグ使用**: 前回投稿をグレー表示で差別化
+- **統一フォーマット**: 個別チューニングと完全に同じ表示形式
+- **視認性向上**: before/after比較が一目で理解可能
+- **履歴一貫性**: 全てのチューニング履歴で統一された表示
+
+#### **効果**
+- **比較表示統一**: 個別・一括チューニング問わず同じ履歴表示
+- **改善確認**: チューニング効果の視覚的確認が容易
+- **ユーザビリティ**: 投稿詳細画面での履歴確認の利便性向上
+
+---
+
 ## 🗃️ データベース変更
 
 ### **posts テーブル**
@@ -741,6 +859,8 @@ ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && git pull origin clean-
 - ✅ 一括承認時の投稿時刻保持機能
 - ✅ **個別承認機能の統一化**（2025年10月8日追加）
 - ✅ **承認済み投稿表示の改善**（2025年10月8日追加）
+- ✅ **一括チューニング機能の復活**（2025年10月8日追加）
+- ✅ **一括チューニング比較表示の統一**（2025年10月8日追加）
 
 ### **短期改善**
 - 一括予約時の詳細ログ出力
@@ -767,5 +887,5 @@ ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && git pull origin clean-
 ---
 
 **最終更新**: 2025年10月8日  
-**文書バージョン**: 1.1  
+**文書バージョン**: 1.2  
 **対象システム**: AIcast Room v2025.10.08
