@@ -37,6 +37,22 @@ from x_api_poster import x_poster
 import requests
 import json
 
+# AI画像投稿機能 (MCF機能と完全分離)
+try:
+    from ai_image_db import (
+        init_image_db, execute_image_query, save_img_post, 
+        update_img_post_status, get_img_post, get_img_posts_by_status,
+        get_img_setting, set_img_setting
+    )
+    from ai_image_generator import (
+        generate_ai_image, get_auto_caption, check_daily_limits,
+        ai_image_generator
+    )
+    AI_IMAGE_AVAILABLE = True
+except ImportError as e:
+    AI_IMAGE_AVAILABLE = False
+    print(f"AI画像投稿機能が利用できません: {e}")
+
 # 安全な日時パースヘルパー関数
 def safe_datetime_parse(date_str, default_format='%Y-%m-%d %H:%M:%S'):
     """
@@ -647,9 +663,6 @@ def clean_generated_content(content):
     # 元のコンテンツをバックアップ
     original_content = content.strip()
     
-    # デバッグ用：生成された内容をログ出力
-    print(f"🔍 [DEBUG] 生成された内容: {repr(original_content)}")
-    
     # まず、明らかなプロンプト漏れパターンをチェック
     prompt_leak_indicators = [
         'ペルソナ：',
@@ -1164,6 +1177,151 @@ def send_retweet_to_google_sheets(cast_id, tweet_id, comment, scheduled_datetime
         
     except Exception as e:
         return False, f"リツイート予約送信エラー: {str(e)}"
+
+def send_image_to_cloud_functions(cast_id, image_path, tweet_content):
+    """AI画像投稿をCloud Functions経由でX APIに送信"""
+    try:
+        # キャスト認証情報を取得
+        cast_credentials = get_cast_x_credentials(cast_id)
+        if not cast_credentials:
+            return False, "キャストのX API認証情報が見つかりません"
+        
+        # キャスト名を取得
+        cast_info = execute_query(
+            "SELECT name, nickname FROM casts WHERE id = ?",
+            (cast_id,), fetch="one"
+        )
+        cast_name = f"{cast_info['name']}（{cast_info['nickname']}）" if cast_info else f"Cast_{cast_id}"
+        
+        # 画像最適化を実行
+        from image_optimizer import optimize_image_for_upload, get_image_info
+        
+        # 元画像の情報を取得
+        original_info = get_image_info(image_path)
+        print(f"元画像情報: {original_info}")
+        
+        # 画像を最適化（Cloud Functions用に小さくする）
+        optimized_path, success, message = optimize_image_for_upload(
+            image_path,
+            max_size=(1024, 1024),  # Twitter推奨サイズ
+            quality=80,  # 品質を少し下げる
+            max_file_size_mb=3  # 3MB以下に制限
+        )
+        
+        if not success:
+            return False, f"画像最適化エラー: {message}"
+        
+        print(f"画像最適化完了: {message}")
+        
+        # 最適化された画像をbase64エンコード
+        import base64
+        try:
+            with open(optimized_path, 'rb') as img_file:
+                image_data = img_file.read()
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                
+            print(f"Base64エンコード完了: {len(image_base64)} 文字")
+            
+        except Exception as e:
+            return False, f"画像読み込みエラー: {str(e)}"
+        
+        # Cloud Functions用ペイロード
+        payload = {
+            "action": "post_with_image",
+            "text": tweet_content,
+            "image_data": image_base64,
+            "image_filename": os.path.basename(optimized_path),
+            "cast_credentials": {
+                "api_key": cast_credentials['api_key'],
+                "api_secret": cast_credentials['api_secret'],
+                "access_token": cast_credentials['access_token'],
+                "access_token_secret": cast_credentials['access_token_secret']
+            }
+        }
+        
+        # Cloud Functions URL（環境変数から取得またはデフォルト）
+        cloud_functions_url = os.environ.get(
+            'X_POSTER_CLOUD_FUNCTIONS_URL',
+            'https://asia-northeast1-aicast-472807.cloudfunctions.net/x-poster'
+        )
+        
+        print(f"Cloud Functions URL: {cloud_functions_url}")
+        print(f"ペイロードサイズ: {len(str(payload))} 文字")
+        
+        # Cloud Functionsに送信（リトライ機能付き）
+        import time
+        for attempt in range(3):
+            try:
+                print(f"送信試行 {attempt + 1}/3...")
+                response = requests.post(
+                    cloud_functions_url,
+                    json=payload,
+                    timeout=60,  # タイムアウトを延長
+                    headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'AIcast-ImagePoster/1.0'
+                    }
+                )
+                
+                print(f"レスポンスコード: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('status') == 'success':
+                        tweet_id = result.get('tweet_id')
+                        # 最適化された一時ファイルを削除
+                        try:
+                            if optimized_path != image_path and os.path.exists(optimized_path):
+                                os.remove(optimized_path)
+                        except:
+                            pass
+                        return True, f"✅ {cast_name}として画像投稿完了！Tweet ID: {tweet_id}"
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
+                        return False, f"❌ Cloud Functions投稿エラー: {error_msg}"
+                else:
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                    if attempt < 2:  # 最後の試行でない場合
+                        print(f"リトライします: {error_msg}")
+                        time.sleep(2 ** attempt)  # 指数バックオフ
+                        continue
+                    return False, f"❌ Cloud Functions接続エラー: {error_msg}"
+                    
+            except requests.exceptions.SSLError as e:
+                error_msg = f"SSL接続エラー: {str(e)}"
+                if attempt < 2:
+                    print(f"SSL エラー、リトライします: {error_msg}")
+                    time.sleep(2 ** attempt)
+                    continue
+                return False, f"❌ {error_msg}"
+                
+            except requests.exceptions.ConnectionError as e:
+                error_msg = f"接続エラー: {str(e)}"
+                if attempt < 2:
+                    print(f"接続エラー、リトライします: {error_msg}")
+                    time.sleep(2 ** attempt)
+                    continue
+                return False, f"❌ {error_msg}"
+                
+            except requests.exceptions.Timeout as e:
+                error_msg = f"タイムアウトエラー: {str(e)}"
+                if attempt < 2:
+                    print(f"タイムアウト、リトライします: {error_msg}")
+                    time.sleep(2 ** attempt)
+                    continue
+                return False, f"❌ {error_msg}"
+        
+        # 最適化された一時ファイルを削除
+        try:
+            if optimized_path != image_path and os.path.exists(optimized_path):
+                os.remove(optimized_path)
+        except:
+            pass
+            
+        return False, "❌ 3回の試行後も送信に失敗しました"
+            
+    except Exception as e:
+        return False, f"❌ 画像投稿送信エラー: {str(e)}"
 
 def send_retweet_to_gas_direct(cast_id, tweet_id, comment, scheduled_datetime):
     """GAS Direct API経由でリツイート予約を送信（スプレッドシート不要）"""
@@ -2227,7 +2385,7 @@ def main():
                 st.rerun()
     
     # メニューの選択肢
-    menu_options = ["📊 ダッシュボード", "投稿管理", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
+    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
     
     # 保存されたページを取得（リロード後の復帰用）
     saved_page = get_current_page()
@@ -3216,6 +3374,7 @@ def main():
 
             with tab2:
                 # Google Sheets連携の設定状況を表示
+                import os
                 credentials_path = "credentials/credentials.json"
                 token_path = "credentials/token.pickle"
                 
@@ -3412,7 +3571,7 @@ def main():
                             cols = st.columns(len(uploaded_images))
                             for i, img in enumerate(uploaded_images):
                                 with cols[i]:
-                                    st.image(img, caption=f"画像{i+1}: {img.name}", use_column_width=True)
+                                    st.image(img, caption=f"画像{i+1}: {img.name}", use_container_width=True)
                         
                         # 投稿ボタン
                         col1, col2 = st.columns(2)
@@ -4210,6 +4369,665 @@ def main():
                         st.markdown(f"[📊 Google Sheetsを開く]({sheets_url})")
                     else:
                         st.error("スプレッドシートIDが設定されていません")
+
+    elif page == "🎨 AI画像投稿":
+        if not AI_IMAGE_AVAILABLE:
+            st.error("🚫 AI画像投稿機能が利用できません")
+            st.info("必要なモジュールがインストールされていない可能性があります")
+            with st.expander("📋 解決方法"):
+                st.markdown("""
+                **必要なパッケージをインストール:**
+                ```bash
+                pip install google-cloud-aiplatform
+                ```
+                """)
+            st.stop()
+        
+        # 認証状況をチェック
+        try:
+            import os
+            adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+            if not os.path.exists(adc_file):
+                st.error("🔐 Google Cloud認証が設定されていません")
+                st.markdown("""
+                **📋 認証設定方法:**
+                1. 左サイドバーの「システム設定」をクリック
+                2. 「🔐 Google Cloud認証」タブを開く
+                3. 認証情報を設定してください
+                """)
+                if st.button("🔧 認証設定に移動", type="primary"):
+                    st.session_state['redirect_to_settings'] = True
+                    st.rerun()
+                st.stop()
+            else:
+                # 認証ファイルの基本情報を表示
+                stat = os.stat(adc_file)
+                st.success(f"✅ Google Cloud認証設定済み (更新: {datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')})")
+                
+        except Exception as e:
+            st.error(f"認証チェックエラー: {e}")
+            st.stop()
+        
+        # 画像投稿専用DBを初期化
+        init_image_db()
+        
+        # Geminiモデルの初期化（投稿管理と同じ処理）
+        if 'gemini_model' not in st.session_state:
+            try:
+                # APIインポートを動的に決定
+                try:
+                    from vertexai.generative_models import GenerativeModel
+                    api_version = "stable"
+                except ImportError:
+                    from vertexai.preview.generative_models import GenerativeModel
+                    api_version = "preview"
+                
+                # シンプルモデル選択
+                selected_model = st.session_state.get('selected_model_name', 'gemini-2.5-flash')
+                
+                if not selected_model or selected_model.strip() == "":
+                    selected_model = 'gemini-2.5-flash'  # デフォルト
+                
+                try:
+                    st.session_state.gemini_model = GenerativeModel(selected_model)
+                    print(f"✅ AI画像投稿: Geminiモデル初期化完了 ({selected_model})")
+                except Exception as model_error:
+                    print(f"❌ AI画像投稿: Geminiモデル初期化失敗: {model_error}")
+                    st.session_state.gemini_model = None
+                    
+            except Exception as e:
+                print(f"❌ AI画像投稿: Gemini初期化エラー: {e}")
+                st.session_state.gemini_model = None
+        
+        st.title("🎨 AI画像投稿")
+        st.markdown("---")
+        
+        # キャスト一覧を取得（MCF DBから）
+        casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
+        if not casts:
+            st.warning("⚠️ キャストが登録されていません")
+            st.info("「キャスト管理」でキャストを作成してください")
+            st.stop()
+        
+        # タブメニュー
+        tab1, tab2, tab3 = st.tabs(["🎨 新規作成", "📋 投稿履歴", "📊 統計"])
+        
+        with tab1:
+            st.subheader("🎨 新規画像投稿")
+            
+            # キャスト選択
+            cast_options = [f"{cast['name']} ({cast['nickname']})" for cast in casts]
+            selected_cast_index = st.selectbox(
+                "投稿するキャスト",
+                range(len(cast_options)),
+                format_func=lambda x: cast_options[x],
+                key="ai_image_cast_selector"
+            )
+            
+            selected_cast = casts[selected_cast_index]
+            cast_id = selected_cast['id']
+            cast_name = selected_cast['name']
+            
+            # 投稿管理スタイルのレイアウト
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # 画像の取得方法を選択（一時的にアップロードのみ）
+                st.info("💡 現在は画像アップロード機能のみ利用可能です")
+                image_method = "📁 ファイルアップロード"
+                
+                st.markdown("---")
+                
+                # ファイルアップロードセクション
+                st.subheader("📁 画像ファイルアップロード")
+                
+                # 画像アップロードセクション
+                uploaded_file = st.file_uploader(
+                    "画像ファイルを選択",
+                    type=['png', 'jpg', 'jpeg', 'gif', 'webp'],
+                    help="対応形式: PNG, JPG, JPEG, GIF, WebP（最大10MB）",
+                    key=f"ai_image_uploader_{st.session_state.get('uploader_reset_counter', 0)}"
+                )
+                
+                if uploaded_file is not None:
+                    # ファイルサイズチェック
+                    if uploaded_file.size > 10 * 1024 * 1024:  # 10MB
+                        st.error("ファイルサイズが10MBを超えています")
+                    else:
+                        # 画像を表示
+                        st.image(uploaded_file, caption="アップロードされた画像", use_container_width=True)
+                        
+                        # アップロードボタン
+                        if st.button("📁 画像を保存", key="save_uploaded_image", type="primary"):
+                            try:
+                                # temp_imagesディレクトリを作成
+                                import os
+                                os.makedirs("temp_images", exist_ok=True)
+                                
+                                # ファイルを保存
+                                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                file_extension = uploaded_file.name.split('.')[-1]
+                                saved_filename = f"uploaded_{timestamp}_{cast_name}.{file_extension}"
+                                saved_path = f"temp_images/{saved_filename}"
+                                
+                                with open(saved_path, "wb") as f:
+                                    f.write(uploaded_file.getbuffer())
+                                
+                                # セッション状態に保存
+                                st.session_state.generated_image_path = saved_path
+                                st.session_state.generated_prompt = f"アップロード画像: {uploaded_file.name}"
+                                
+                                # アップロード画像の場合は、ファイル名を基本プロンプトとして設定
+                                st.session_state.original_image_prompt = f"アップロード画像: {uploaded_file.name}"
+                                
+                                st.session_state.selected_cast_id = cast_id
+                                st.session_state.selected_cast_name = cast_name
+                                st.session_state.image_source = "uploaded"
+                                
+                                st.success("✅ 画像が保存されました！")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"画像の保存に失敗しました: {e}")
+            
+            with col2:
+                # サイドパネル：投稿設定
+                if (st.session_state.get('generated_image_path') and 
+                    os.path.exists(st.session_state.generated_image_path) and
+                    st.session_state.get('selected_cast_id') and
+                    st.session_state.get('image_source')):
+                    st.markdown("### 📤 投稿設定")
+                    
+                    # 画像のソースを表示
+                    source_text = "AI生成" if st.session_state.get('image_source') == "ai_generated" else "アップロード"
+                    st.caption(f"画像ソース: {source_text}")
+                    
+                    # 小さく画像を再表示
+                    st.image(st.session_state.generated_image_path, caption=f"{source_text}画像", width=200)
+                    
+                    # コメント生成指示（投稿管理スタイル）
+                    user_instruction = st.text_area(
+                        "💬 コメント指示",
+                        placeholder="例: 可愛らしい感じで、猫好きアピールを入れて",
+                        help="AIがコメントを生成する際の特別な指示",
+                        key="ai_comment_instruction_main",
+                        height=80
+                    )
+                    
+                    # AIコメント生成ボタン
+                    if st.button("🤖 AIコメント生成", key="generate_comment", type="secondary"):
+                        with st.spinner("AIコメントを生成中..."):
+                            # 投稿管理と同じ方法でコメント生成
+                            cast_id = st.session_state.get('selected_cast_id')
+                            cast_name = st.session_state.get('selected_cast_name', '')
+                            
+                            # 適切なプロンプトを決定
+                            original_prompt = st.session_state.get('original_image_prompt', '')
+                            
+                            # プロンプトの優先順位を改善
+                            if user_instruction and user_instruction.strip():
+                                # ユーザー指示が最優先
+                                image_context = user_instruction.strip()
+                            elif original_prompt and not original_prompt.startswith('アップロード画像:'):
+                                # AI生成のオリジナルプロンプト
+                                image_context = original_prompt
+                            else:
+                                # アップロード画像の場合は汎用的な指示
+                                image_context = "アップロードされた画像"
+                            
+                            # 投稿管理と同じGeminiモデルチェック
+                            if st.session_state.get('gemini_model'):
+                                try:
+                                    # キャスト情報を取得
+                                    if cast_id:
+                                        cast_details = execute_query(
+                                            "SELECT * FROM casts WHERE id = ?", 
+                                            (cast_id,)
+                                        )
+                                        if cast_details:
+                                            persona_sheet = format_persona(cast_details[0], include_x_username=False)
+                                        else:
+                                            persona_sheet = f"キャスト名: {cast_name}"
+                                    else:
+                                        persona_sheet = f"キャスト名: {cast_name}"
+                                    
+                                    # 投稿管理と完全に同じプロンプト形式
+                                    caption_prompt = f"""# ペルソナ
+{persona_sheet}
+
+# 投稿指示
+{image_context}
+
+# ルール
+上記の指示に従って、このキャラクターらしいSNS投稿を**140文字以内**で生成してください。キャラクターの個性、口調、趣味嗜好を反映させてください。"""
+                                    
+                                    # 投稿管理と同じsafe_generate_content使用
+                                    auto_caption = safe_generate_content(st.session_state.gemini_model, caption_prompt)
+                                    
+                                    if auto_caption and hasattr(auto_caption, 'text') and auto_caption.text.strip():
+                                        auto_caption_text = clean_generated_content(auto_caption.text)
+                                        
+                                        # 文字数制限チェック（140文字）
+                                        if len(auto_caption_text) > 140:
+                                            auto_caption_text = auto_caption_text[:137] + "..."
+                                        
+                                        st.session_state.auto_caption = auto_caption_text
+                                        st.success("✅ コメント生成完了！")
+                                    else:
+                                        # auto_captionが空またはNoneの場合
+                                        raise ValueError("生成されたコンテンツが空です")
+                                    
+                                except Exception as e:
+                                    # シンプルなフォールバック
+                                    if image_context and image_context.strip():
+                                        hashtag = image_context.replace(' ', '').replace('　', '')[:10]
+                                        auto_caption = f"素晴らしい画像ですね！ #{hashtag}" if hashtag else "素晴らしい画像ですね！"
+                                    else:
+                                        auto_caption = "素晴らしい画像ですね！"
+                                    
+                                    st.session_state.auto_caption = auto_caption
+                                    st.error(f"⚠️ AI生成に失敗しました: {str(e)}")
+                                    st.info("💡 フォールバック処理でコメントを生成しました。")
+                            else:
+                                # Geminiモデルが利用できない場合
+                                auto_caption = f"画像を投稿しました！"
+                                st.session_state.auto_caption = auto_caption
+                                st.info("💡 Geminiモデルが利用できないため、フォールバック処理でコメントを生成しました。")
+                            
+                            st.rerun()
+                    
+                    # === 生成されたコメントのチューニング機能 ===
+                    if st.session_state.get('auto_caption'):
+                        st.markdown("### 🎯 コメントチューニング")
+                        
+                        # チューニングオプション
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # 感情・トーン調整
+                            tone_options = {
+                                "そのまま": "",
+                                "もっと楽しく": "より楽しく明るい表現に",
+                                "もっと丁寧に": "より丁寧で上品な表現に", 
+                                "もっとカジュアルに": "よりカジュアルでフレンドリーな表現に",
+                                "もっと専門的に": "より専門的で詳しい表現に",
+                                "もっと簡潔に": "より簡潔で短い表現に"
+                            }
+                            
+                            selected_tone = st.selectbox(
+                                "🎭 トーン調整",
+                                options=list(tone_options.keys()),
+                                help="生成されたコメントのトーンを調整できます"
+                            )
+                        
+                        with col2:
+                            # 追加要素
+                            add_elements = st.multiselect(
+                                "➕ 追加要素",
+                                ["絵文字を追加", "ハッシュタグを追加", "質問を追加", "感想を追加", "おすすめポイントを追加"],
+                                help="コメントに追加したい要素を選択"
+                            )
+                        
+                        # 自由記述でのチューニング指示
+                        custom_tuning = st.text_area(
+                            "✏️ 自由チューニング指示",
+                            placeholder="例: もっと親しみやすく、猫好きアピールを強めて、関西弁で",
+                            help="具体的なチューニング指示を入力してください",
+                            height=60
+                        )
+                        
+                        # チューニング実行ボタン
+                        col_tune, col_restore = st.columns([2, 1])
+                        with col_tune:
+                            if st.button("🔄 コメントを再生成", key="tune_comment"):
+                                if selected_tone != "そのまま" or add_elements or custom_tuning.strip():
+                                    with st.spinner("コメントを再調整中..."):
+                                        # チューニング指示を組み立て
+                                        tuning_instructions = []
+                                        
+                                        if selected_tone != "そのまま":
+                                            tuning_instructions.append(tone_options[selected_tone])
+                                        
+                                        if add_elements:
+                                            for element in add_elements:
+                                                if element == "絵文字を追加":
+                                                    tuning_instructions.append("適切な絵文字を追加")
+                                                elif element == "ハッシュタグを追加":
+                                                    tuning_instructions.append("関連するハッシュタグを追加")
+                                                elif element == "質問を追加":
+                                                    tuning_instructions.append("読者への質問を追加")
+                                                elif element == "感想を追加":
+                                                    tuning_instructions.append("個人的な感想を追加")
+                                                elif element == "おすすめポイントを追加":
+                                                    tuning_instructions.append("おすすめポイントを追加")
+                                        
+                                        if custom_tuning.strip():
+                                            tuning_instructions.append(custom_tuning.strip())
+                                        
+                                        # 元のコメントを基にしたチューニングプロンプト
+                                        try:
+                                            cast_id = st.session_state.get('selected_cast_id')
+                                            if cast_id:
+                                                cast_details = execute_query("SELECT * FROM casts WHERE id = ?", (cast_id,))
+                                                if cast_details:
+                                                    persona_sheet = format_persona(cast_details[0], include_x_username=False)
+                                                else:
+                                                    persona_sheet = f"キャスト名: {st.session_state.get('selected_cast_name', '')}"
+                                            else:
+                                                persona_sheet = f"キャスト名: {st.session_state.get('selected_cast_name', '')}"
+                                            
+                                            original_comment = st.session_state.get('auto_caption', '')
+                                            tuning_prompt = f"""# ペルソナ
+{persona_sheet}
+
+# 元のコメント
+{original_comment}
+
+# チューニング指示
+以下の指示に従って、元のコメントを調整してください：
+{' / '.join(tuning_instructions)}
+
+# ルール
+- 元のコメントの良い部分は残しつつ、指示に従って調整してください
+- このキャラクターらしさを保ってください
+- **140文字以内**で調整してください
+- 自然で魅力的な投稿にしてください"""
+                                            
+                                            if st.session_state.get('gemini_model'):
+                                                tuned_comment = safe_generate_content(st.session_state.gemini_model, tuning_prompt)
+                                                if tuned_comment and hasattr(tuned_comment, 'text') and tuned_comment.text.strip():
+                                                    tuned_text = clean_generated_content(tuned_comment.text)
+                                                    if len(tuned_text) > 140:
+                                                        tuned_text = tuned_text[:137] + "..."
+                                                    st.session_state.auto_caption = tuned_text
+                                                    st.success("✅ コメントを再調整しました！")
+                                                    st.rerun()
+                                                else:
+                                                    st.error("チューニングに失敗しました")
+                                            else:
+                                                st.error("Geminiモデルが利用できません")
+                                        except Exception as e:
+                                            st.error(f"チューニングエラー: {str(e)}")
+                                else:
+                                    st.warning("チューニング指示を選択または入力してください")
+                        
+                        with col_restore:
+                            if st.button("🔙 元に戻す", key="restore_original"):
+                                if 'original_auto_caption' in st.session_state:
+                                    st.session_state.auto_caption = st.session_state.original_auto_caption
+                                    st.success("元のコメントに戻しました")
+                                    st.rerun()
+                                else:
+                                    st.warning("元のコメントが見つかりません")
+                        
+                        # 元のコメントを保存（初回のみ）
+                        if 'original_auto_caption' not in st.session_state and st.session_state.get('auto_caption'):
+                            st.session_state.original_auto_caption = st.session_state.auto_caption
+                        
+                        st.divider()
+                    
+                    # ツイート内容の編集
+                    tweet_content = st.text_area(
+                        "ツイート内容",
+                        value=st.session_state.get('auto_caption', ''),
+                        max_chars=280,
+                        help="画像と一緒に投稿するテキスト（280文字以内）",
+                        key="tweet_content_for_image",
+                        height=120
+                    )
+                    
+                    # 文字数表示
+                    char_count = len(tweet_content)
+                    if char_count > 280:
+                        st.error(f"文字数オーバー: {char_count}/280")
+                    else:
+                        st.info(f"文字数: {char_count}/280")
+                    
+                    # 投稿ボタン
+                    col_post, col_reset = st.columns([2, 1])
+                    with col_post:
+                        post_button = st.button("📤 X投稿", key="post_ai_image", type="primary")
+                    with col_reset:
+                        if st.button("🔄", key="reset_image", help="リセット"):
+                            # セッション状態をクリア
+                            image_path_to_cleanup = st.session_state.get('generated_image_path')
+                            
+                            # すべての関連セッション状態を削除
+                            all_keys_to_clear = [
+                                'generated_image_path', 'generated_prompt', 'original_image_prompt',
+                                'selected_cast_id', 'selected_cast_name', 'auto_caption', 
+                                'image_source', 'user_instruction', 'original_auto_caption'
+                            ]
+                            for key in all_keys_to_clear:
+                                if key in st.session_state:
+                                    del st.session_state[key]
+                            
+                            # ファイルアップローダーをリセット
+                            st.session_state.uploader_reset_counter = st.session_state.get('uploader_reset_counter', 0) + 1
+                            
+                            # 一時画像ファイルを削除
+                            if image_path_to_cleanup and os.path.exists(image_path_to_cleanup):
+                                try:
+                                    os.remove(image_path_to_cleanup)
+                                except Exception as e:
+                                    pass  # エラーは無視
+                            
+                            st.success("リセットしました")
+                            time.sleep(0.5)
+                            st.rerun()
+                    
+                    if post_button:
+                        # キャスト情報の確認
+                        if not st.session_state.get('selected_cast_id'):
+                            st.error("❌ キャストが選択されていません")
+                            st.info("💡 まず画像を生成またはアップロードしてキャストを選択してください")
+                            st.stop()
+                        
+                        if not st.session_state.get('selected_cast_name'):
+                            st.error("❌ キャスト名が設定されていません")
+                            st.stop()
+                        
+                        # 投稿処理を実行
+                        cast_credentials = get_cast_x_credentials(st.session_state.selected_cast_id)
+                        
+                        if not cast_credentials:
+                            st.error(f"❌ {st.session_state.selected_cast_name} のX API認証情報が設定されていません")
+                            st.info("「キャスト管理」でX API認証情報を設定してください")
+                        else:
+                            # 画像投稿データをDBに保存
+                            img_post_id = save_img_post(
+                                prompt=st.session_state.generated_prompt,
+                                cast_id=st.session_state.selected_cast_id,
+                                cast_name=st.session_state.selected_cast_name,
+                                tweet_content=tweet_content
+                            )
+                            
+                            if img_post_id:
+                                # 画像パスを更新
+                                update_img_post_status(
+                                    img_post_id, 
+                                    "ready",
+                                    generated_image_path=st.session_state.generated_image_path
+                                )
+                                
+                                # Cloud Functions経由で投稿
+                                try:
+                                    success, result_message = send_image_to_cloud_functions(
+                                        cast_id=st.session_state.selected_cast_id,
+                                        image_path=st.session_state.generated_image_path,
+                                        tweet_content=tweet_content
+                                    )
+                                    
+                                    if success:
+                                        st.success(result_message)
+                                        
+                                        # 投稿成功の場合、DBステータスを更新
+                                        update_img_post_status(
+                                            img_post_id, 
+                                            "posted",
+                                            posted_at=datetime.datetime.now().isoformat(),
+                                            tweet_id=result_message.split("Tweet ID: ")[-1] if "Tweet ID:" in result_message else None
+                                        )
+                                        
+                                        # セッション状態をクリア
+                                        image_path_to_cleanup = st.session_state.get('generated_image_path')
+                                        
+                                        # すべての関連セッション状態を削除
+                                        all_keys_to_clear = [
+                                            'generated_image_path', 'generated_prompt', 'original_image_prompt',
+                                            'selected_cast_id', 'selected_cast_name', 'auto_caption',
+                                            'image_source', 'user_instruction', 'original_auto_caption'
+                                        ]
+                                        for key in all_keys_to_clear:
+                                            if key in st.session_state:
+                                                del st.session_state[key]
+                                        
+                                        # ファイルアップローダーをリセット
+                                        st.session_state.uploader_reset_counter = st.session_state.get('uploader_reset_counter', 0) + 1
+                                        
+                                        # 一時画像ファイルを削除
+                                        if image_path_to_cleanup and os.path.exists(image_path_to_cleanup):
+                                            try:
+                                                os.remove(image_path_to_cleanup)
+                                            except Exception as e:
+                                                pass  # エラーは無視
+                                        
+                                        # 明示的にページの状態をリセット
+                                        st.success("✅ 投稿完了！ページをリセットします...")
+                                        time.sleep(1)  # 1秒待機してユーザーにメッセージを見せる
+                                        st.rerun()
+                                    else:
+                                        st.error(result_message)
+                                        update_img_post_status(img_post_id, "failed", error_message=result_message)
+                                    
+                                except Exception as e:
+                                    error_msg = f"投稿に失敗しました: {e}"
+                                    st.error(f"❌ {error_msg}")
+                                    update_img_post_status(img_post_id, "failed", error_message=error_msg)
+                            else:
+                                st.error("データベース保存に失敗しました")
+                else:
+                    st.markdown("### 📋 手順")
+                    st.markdown("""
+                    1. **キャスト選択**: 投稿するキャラクターを選択
+                    2. **画像準備**: AI生成またはファイルアップロード
+                    3. **コメント指示**: AIがコメント生成する際の指示
+                    4. **コメント生成**: キャラクターの個性を活かしたコメント作成
+                    5. **投稿実行**: X（旧Twitter）への投稿
+                    """)
+                    
+                    st.markdown("### ⚙️ 設定")
+                    # 高度な設定をサイドパネルに移動
+                    with st.expander("画像生成設定"):
+                        aspect_ratio = st.selectbox(
+                            "アスペクト比",
+                            ["1:1", "16:9", "9:16", "4:3", "3:4"],
+                            index=0,
+                            help="1:1はSNS投稿に最適"
+                        )
+                        
+                        image_size = st.selectbox(
+                            "画像サイズ",
+                            ["1024x1024", "512x512"],
+                            index=0
+                        )
+        
+        with tab2:
+            st.subheader("📋 投稿履歴")
+            
+            # フィルタオプション
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                status_filter = st.selectbox(
+                    "ステータスフィルタ",
+                    ["すべて", "draft", "ready", "posted", "failed"],
+                    key="history_status_filter"
+                )
+            
+            with col2:
+                cast_filter = st.selectbox(
+                    "キャストフィルタ",
+                    ["すべて"] + [f"{cast['name']}" for cast in casts],
+                    key="history_cast_filter"
+                )
+            
+            # 履歴取得
+            status = None if status_filter == "すべて" else status_filter
+            cast_id_filter = None
+            if cast_filter != "すべて":
+                cast_id_filter = next(cast['id'] for cast in casts if cast['name'] == cast_filter)
+            
+            history = get_img_posts_by_status(status=status, cast_id=cast_id_filter, limit=20)
+            
+            if history:
+                for post in history:
+                    with st.expander(f"🎨 {post['prompt'][:50]}... - {post['cast_name']} ({post['status']})"):
+                        col1, col2 = st.columns([1, 1])
+                        
+                        with col1:
+                            st.write(f"**プロンプト:** {post['prompt']}")
+                            st.write(f"**キャスト:** {post['cast_name']}")
+                            st.write(f"**ステータス:** {post['status']}")
+                            st.write(f"**作成日時:** {post['created_at']}")
+                            
+                            if post['tweet_content']:
+                                st.write(f"**ツイート内容:** {post['tweet_content']}")
+                            
+                            if post['tweet_id']:
+                                st.write(f"**Tweet ID:** {post['tweet_id']}")
+                            
+                            if post['error_message']:
+                                st.error(f"エラー: {post['error_message']}")
+                        
+                        with col2:
+                            if post['generated_image_path'] and os.path.exists(post['generated_image_path']):
+                                st.image(post['generated_image_path'], caption="生成画像")
+                            else:
+                                st.info("画像ファイルが見つかりません")
+            else:
+                st.info("投稿履歴がありません")
+        
+        with tab3:
+            st.subheader("📊 生成統計")
+            
+            # 統計期間選択
+            period = st.selectbox("期間", ["7日間", "30日間", "90日間"], key="stats_period")
+            period_days = {"7日間": 7, "30日間": 30, "90日間": 90}[period]
+            
+            # 全体統計
+            all_stats = ai_image_generator.get_generation_stats(days=period_days)
+            
+            if all_stats:
+                # グラフ表示用のデータ準備
+                dates = [stat['generation_date'] for stat in all_stats]
+                total_counts = [stat['total_generations'] for stat in all_stats]
+                success_counts = [stat['successful_generations'] for stat in all_stats]
+                
+                # 統計表示
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    total_generations = sum(total_counts)
+                    st.metric("総生成数", total_generations)
+                
+                with col2:
+                    total_success = sum(success_counts)
+                    success_rate = (total_success / total_generations * 100) if total_generations > 0 else 0
+                    st.metric("成功率", f"{success_rate:.1f}%")
+                
+                with col3:
+                    avg_time = sum(stat['avg_generation_time'] or 0 for stat in all_stats) / len(all_stats)
+                    st.metric("平均生成時間", f"{avg_time:.2f}秒")
+                
+                # 日別生成数グラフ（簡易版）
+                st.subheader("📈 日別生成数")
+                chart_data = pd.DataFrame({
+                    "日付": dates,
+                    "生成数": total_counts,
+                    "成功数": success_counts
+                })
+                st.line_chart(chart_data.set_index("日付"))
+            else:
+                st.info("統計データがありません")
 
     elif page == "一斉指示":
         st.title("📣 一斉指示（キャンペーン）")
@@ -5973,6 +6791,7 @@ def main():
                 st.markdown("**💡 ヒント:** 通常は `gcloud` コマンドラインツールを使用することを推奨します。")
         
         with sheets_tab:
+            import os
             st.subheader("🗃️ Google Sheets 連携設定")
             st.markdown("Google Sheets APIを使用して投稿を送信するための認証設定を行います。")
         
