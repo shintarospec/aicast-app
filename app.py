@@ -4848,9 +4848,15 @@ def main():
                         st.divider()
                     
                     # ツイート内容の編集
+                    # セッション状態から値を取得し、ウィジェットキーに直接設定
+                    if 'tweet_content_for_image' not in st.session_state:
+                        st.session_state.tweet_content_for_image = st.session_state.get('auto_caption', '')
+                    elif st.session_state.get('auto_caption') and st.session_state.tweet_content_for_image != st.session_state.auto_caption:
+                        # auto_captionが更新されたら、tweet_contentも更新
+                        st.session_state.tweet_content_for_image = st.session_state.auto_caption
+                    
                     tweet_content = st.text_area(
                         "ツイート内容",
-                        value=st.session_state.get('auto_caption', ''),
                         max_chars=280,
                         help="画像と一緒に投稿するテキスト（280文字以内）",
                         key="tweet_content_for_image",
