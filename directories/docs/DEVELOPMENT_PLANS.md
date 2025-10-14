@@ -24,7 +24,7 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 
 ## 📋 現在の進捗状況
 
-### ✅ 完了済み機能（2025-10-13時点）
+### ✅ 完了済み機能（2025-10-14更新）
 
 #### 🎖️ MCF機能群
 - [x] **X API投稿機能** - テキスト・画像投稿対応
@@ -33,6 +33,7 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 - [x] **引用ツイート機能** - カスタムコメント対応
 - [x] **スケジューラー** - cron自動実行対応
 - [x] **API認証管理** - キャスト別認証情報
+- [x] **Secret Manager自動同期** - DB↔Secret Manager完全自動化（2025-10-14）
 
 #### 🧠 内部処理機能
 - [x] **AI画像生成・投稿** - Vertex AI Imagen連携
@@ -41,6 +42,7 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 - [x] **投稿後自動クリーンアップ** - セッション状態管理
 - [x] **キャスト管理** - PERSONA_FIELDS完全対応
 - [x] **投稿管理** - 下書き→承認→送信フロー
+- [x] **投稿承認日自動設定** - JST今日の日付を正確に設定（2025-10-14）
 
 #### 📊 運用管理機能
 - [x] **投稿履歴管理** - send_history完全追跡
@@ -89,6 +91,22 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 ---
 
 ## 🔍 発見と驚き
+
+### 2025-10-14: Secret Manager自動同期実装
+**発見**: 手動オペレーションの危険性を再認識
+- Secret Managerとデータベースでフィールド名が不一致
+- 手動登録では必ずミスが発生する構造的問題
+- 新規アカウント登録時に投稿失敗の連鎖
+
+**驚き**: フィールド名の不一致が長期間気づかれなかった
+- Database: `api_key`, `api_secret` (5フィールド)
+- Secret Manager: `consumer_key`, `consumer_secret` (4フィールド)
+- マッピング層の重要性を実感
+
+**教訓**: 
+- 外部システム連携は完全自動化が必須
+- フィールド名の統一性がメンテナンス性を左右
+- Python関数内importの危険性（UnboundLocalError）
 
 ### 2025-10-13: 文書整備プロジェクト開始
 **発見**: 既存の運用品質が予想以上に高い
@@ -164,6 +182,7 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 ## 📋 To-Do List
 
 ### 🔥 緊急度: HIGH
+- [x] **Secret Manager自動同期** - 2025-10-14完了✅
 - [ ] **Google認証効率化** - ADC有効期限延長・自動更新機能
 - [ ] **本番アップ準備** - 画像投稿機能の本番反映
 - [ ] **100キャスト運用準備** - スケール対応確認
@@ -222,5 +241,16 @@ AIcast RoomはMCF（Mission Critical Functions）重視の外部連携型SNS投�
 
 **This document serves as the long-term memory of AIcast Room development, following OpenAI's 160-line format methodology.**
 
-**最終更新:** 2025-10-13  
+**最終更新:** 2025-10-14  
 **次回更新:** 進捗発生時・週次チェック時
+
+---
+
+## 📋 最近の更新履歴
+
+### 2025-10-14
+- ✅ Secret Manager自動同期機能実装完了
+- ✅ 投稿承認日の自動設定修正
+- ✅ import os 重複エラー解消（4箇所）
+- ✅ ドキュメント構造整理（/docs → /directories/docs統一）
+- 📝 TROUBLESHOOTING_SESSION_2025-10-14.md 作成

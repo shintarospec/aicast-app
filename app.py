@@ -16,6 +16,10 @@ import io
 import re
 import gspread
 from google.oauth2.service_account import Credentials
+try:
+    from google.cloud import secretmanager_v1 as secretmanager
+except ImportError:
+    secretmanager = None
 import pickle
 
 # 🔐 認証システムのインポート
@@ -1951,8 +1955,68 @@ def get_cast_x_credentials(cast_id):
     else:
         return None
 
+def sync_to_secret_manager(twitter_username, api_key, api_secret, bearer_token, access_token, access_token_secret):
+    """データベースからSecret Managerに認証情報を自動同期"""
+    try:
+        # Secret Managerが利用できない場合はスキップ
+        if secretmanager is None:
+            return False, "Secret Manager SDKがインストールされていません"
+        
+        # GCPプロジェクトID取得
+        project_id = os.environ.get('GCP_PROJECT', 'aicast-472807')
+        
+        # Secret Managerクライアント初期化
+        client = secretmanager.SecretManagerServiceClient()
+        
+        # Secret名（既存アカウント形式に統一）
+        secret_id = f"x-api-{twitter_username}"
+        parent = f"projects/{project_id}"
+        secret_path = f"{parent}/secrets/{secret_id}"
+        
+        # 認証情報をJSON形式で準備（既存アカウントと同じフィールド名）
+        credentials_data = {
+            "consumer_key": api_key,
+            "consumer_secret": api_secret,
+            "bearer_token": bearer_token,
+            "access_token": access_token,
+            "access_token_secret": access_token_secret
+        }
+        credentials_json = json.dumps(credentials_data)
+        
+        # Secretが存在するか確認
+        try:
+            client.get_secret(request={"name": secret_path})
+            secret_exists = True
+        except Exception:
+            secret_exists = False
+        
+        # Secretが存在しない場合は作成
+        if not secret_exists:
+            client.create_secret(
+                request={
+                    "parent": parent,
+                    "secret_id": secret_id,
+                    "secret": {"replication": {"automatic": {}}}
+                }
+            )
+        
+        # 新しいバージョンとして認証情報を追加
+        client.add_secret_version(
+            request={
+                "parent": secret_path,
+                "payload": {"data": credentials_json.encode("UTF-8")}
+            }
+        )
+        
+        return True, f"Secret Manager同期成功: {secret_id}"
+        
+    except Exception as e:
+        error_msg = f"Secret Manager同期エラー: {str(e)}"
+        print(error_msg)  # ログに出力
+        return False, error_msg
+
 def save_cast_x_credentials(cast_id, api_key, api_secret, bearer_token, access_token, access_token_secret, twitter_username=None, twitter_user_id=None):
-    """キャストのX API認証情報を保存"""
+    """キャストのX API認証情報を保存（Secret Manager自動同期付き）"""
     try:
         # 既存の認証情報があるかチェック
         existing = get_cast_x_credentials(cast_id)
@@ -1973,6 +2037,17 @@ def save_cast_x_credentials(cast_id, api_key, api_secret, bearer_token, access_t
                 (cast_id, api_key, api_secret, bearer_token, access_token, access_token_secret, twitter_username, twitter_user_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (cast_id, api_key, api_secret, bearer_token, access_token, access_token_secret, twitter_username, twitter_user_id, current_time, current_time))
+        
+        # 🔄 Secret Managerに自動同期（twitter_usernameが設定されている場合のみ）
+        if twitter_username:
+            success, message = sync_to_secret_manager(
+                twitter_username, api_key, api_secret, bearer_token, 
+                access_token, access_token_secret
+            )
+            if success:
+                st.success(f"✅ {message}")
+            else:
+                st.warning(f"⚠️ データベースに保存されましたが、Secret Manager同期に失敗しました: {message}")
         
         return True
     except Exception as e:
@@ -2169,12 +2244,21 @@ def remove_column_from_casts_table(field_name):
 
 # --- コールバック関数 ---
 def quick_approve(post_id):
+    """クイック承認（承認日を今日に設定）"""
     created_at_row = execute_query("SELECT created_at FROM posts WHERE id = ?", (post_id,), fetch="one")
     if created_at_row:
         created_at = created_at_row['created_at']
-        posted_at_time = created_at.split(' ')[1] if ' ' in created_at else created_at
-        execute_query("UPDATE posts SET evaluation = '◎', status = 'approved', posted_at = ? WHERE id = ?", (posted_at_time, post_id))
-        st.session_state.page_status_message = ("success", "投稿をクイック承認しました！")
+        # 承認日をJST（日本時間）で取得
+        approval_date_jst = datetime.datetime.now(JST).date()
+        # created_atから時刻部分を抽出
+        if ' ' in created_at:
+            time_part = created_at.split(' ')[1]
+        else:
+            time_part = created_at
+        # 承認日（JST）+ 設定時刻で完全なdatetimeを作成
+        posted_at_full = f"{approval_date_jst.strftime('%Y-%m-%d')} {time_part}"
+        execute_query("UPDATE posts SET evaluation = '◎', status = 'approved', posted_at = ?, scheduled_at = ? WHERE id = ?", (posted_at_full, posted_at_full, post_id))
+        st.session_state.page_status_message = ("success", f"投稿をクイック承認しました！（承認日: {approval_date_jst}）")
     else:
         st.session_state.page_status_message = ("error", f"エラー: 投稿ID {post_id} が見つかりません。")
 
@@ -3374,7 +3458,6 @@ def main():
 
             with tab2:
                 # Google Sheets連携の設定状況を表示
-                import os
                 credentials_path = "credentials/credentials.json"
                 token_path = "credentials/token.pickle"
                 
@@ -4385,7 +4468,6 @@ def main():
         
         # 認証状況をチェック
         try:
-            import os
             adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
             if not os.path.exists(adc_file):
                 st.error("🔐 Google Cloud認証が設定されていません")
@@ -4501,7 +4583,6 @@ def main():
                         if st.button("📁 画像を保存", key="save_uploaded_image", type="primary"):
                             try:
                                 # temp_imagesディレクトリを作成
-                                import os
                                 os.makedirs("temp_images", exist_ok=True)
                                 
                                 # ファイルを保存
@@ -6791,7 +6872,6 @@ def main():
                 st.markdown("**💡 ヒント:** 通常は `gcloud` コマンドラインツールを使用することを推奨します。")
         
         with sheets_tab:
-            import os
             st.subheader("🗃️ Google Sheets 連携設定")
             st.markdown("Google Sheets APIを使用して投稿を送信するための認証設定を行います。")
         

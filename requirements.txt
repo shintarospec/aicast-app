@@ -1,6 +1,7 @@
 streamlit
 pandas
 google-cloud-aiplatform
+google-cloud-secret-manager
 gspread
 google-auth
 requests
