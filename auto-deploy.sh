@@ -15,7 +15,7 @@ else
 fi
 
 git commit -m "$COMMIT_MSG"
-git push origin main
+git push origin clean-production
 
 echo "✅ GitHubにプッシュ完了"
 echo ""
@@ -36,7 +36,8 @@ if command -v sshpass >/dev/null 2>&1; then
         cd /home/ubuntu/aicast-app
         
         echo "📥 最新コードを取得中..."
-        git pull origin main
+        git checkout clean-production
+        git pull origin clean-production
         
         echo "🔄 既存プロセスの停止..."
         if screen -list | grep -q "aicast"; then
