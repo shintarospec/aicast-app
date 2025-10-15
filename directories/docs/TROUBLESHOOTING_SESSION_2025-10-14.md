@@ -146,6 +146,127 @@ def quick_approve(post_id):
 
 ---
 
+### 7. AI画像投稿機能のモジュール欠如（VPS環境）
+**症状:** VPS本番環境で「AI画像投稿機能が利用できません: No module named 'ai_image_db'」エラー  
+**原因:** 
+- AI画像投稿関連ファイルがgitにコミットされていなかった
+- 前回のコミットで `git add -A` 実行時にアンステージしていた
+
+**不足していたファイル:**
+```
+ai_image_db.py            # 画像DB管理モジュール（8,201 bytes）
+ai_image_cloud_functions.py  # Cloud Functions連携（7,902 bytes）
+aicast_images.db          # 画像データベース（32,768 bytes）
+```
+
+**影響:**
+- ローカル環境：正常動作（ファイルが存在）
+- VPS環境：エラーで機能停止
+
+**解決策:**
+1. 不足ファイルをgit add
+2. コミット＆プッシュ（コミット: `b225fc73`）
+3. VPSでgit pull & 再起動
+
+**結果:** ✅ VPS上でもAI画像投稿ページがエラーなく表示される
+
+---
+
+### 8. AI画像コメント生成機能の環境設定問題
+**症状:** VPS環境でAIコメント生成ボタンを押してもコメントが生成されない  
+**原因1:** 環境変数 `GCP_PROJECT` が設定されていない  
+**影響:** Vertex AI Geminiモデルの初期化に失敗
+
+**解決策1: GCP_PROJECT環境変数の設定**
+```bash
+# VPS上で起動スクリプトを作成
+cat > /home/ubuntu/aicast-app/start_with_env.sh << 'EOF'
+#!/bin/bash
+cd /home/ubuntu/aicast-app
+source .venv/bin/activate
+export GCP_PROJECT=aicast-472807
+python3 run.py
+EOF
+chmod +x /home/ubuntu/aicast-app/start_with_env.sh
+
+# 新スクリプトでアプリ起動
+screen -dmS aicast bash start_with_env.sh
+```
+
+**検証:** 環境変数が正しく設定されていることを確認
+```bash
+ps aux | grep "python3 run.py" | awk '{print $2}' | head -1 | \
+  xargs -I {} cat /proc/{}/environ | tr "\0" "\n" | grep GCP_PROJECT
+# 出力: GCP_PROJECT=aicast-472807 ✅
+```
+
+**結果:** ✅ 環境変数設定完了
+
+---
+
+### 9. AI画像コメント表示問題（Streamlitセッション状態）
+**症状:** 
+- AIコメント生成は成功（「✅ コメント生成完了！」表示）
+- 文字数は正しく表示（例: 文字数: 80/280）
+- **しかしテキストエリアは空白**
+
+**原因:** Streamlitのウィジェット状態管理の問題
+```python
+# 問題のコード
+tweet_content = st.text_area(
+    "ツイート内容",
+    value=st.session_state.get('auto_caption', ''),  # ❌ valueパラメータが無視される
+    key="tweet_content_for_image",  # keyがある場合、valueより優先
+    height=120
+)
+```
+
+**Streamlitの仕様:**
+- `key` パラメータを指定すると、ウィジェットは独自の状態を持つ
+- `value` パラメータは初回レンダリング時のみ有効
+- セッション状態 `st.session_state['key']` がウィジェットの値を管理
+
+**問題の流れ:**
+1. AIコメント生成 → `st.session_state.auto_caption` に保存（80文字）
+2. `st.rerun()` で再レンダリング
+3. `st.text_area` の `value=st.session_state.get('auto_caption', '')` は無視される
+4. `st.session_state.tweet_content_for_image` が空のまま（初期化されていない）
+5. **結果: テキストエリアは空白、しかし文字数カウントは `auto_caption` から計算されて80と表示**
+
+**解決策: セッション状態の同期**
+```python
+# 修正後のコード
+# セッション状態から値を取得し、ウィジェットキーに直接設定
+if 'tweet_content_for_image' not in st.session_state:
+    st.session_state.tweet_content_for_image = st.session_state.get('auto_caption', '')
+elif st.session_state.get('auto_caption') and st.session_state.tweet_content_for_image != st.session_state.auto_caption:
+    # auto_captionが更新されたら、tweet_contentも更新
+    st.session_state.tweet_content_for_image = st.session_state.auto_caption
+
+tweet_content = st.text_area(
+    "ツイート内容",
+    max_chars=280,
+    help="画像と一緒に投稿するテキスト（280文字以内）",
+    key="tweet_content_for_image",  # valueパラメータ削除、keyのみ使用
+    height=120
+)
+```
+
+**ポイント:**
+- `st.session_state.tweet_content_for_image` に直接値を設定
+- `auto_caption` 更新時に `tweet_content_for_image` も自動更新
+- `value` パラメータを削除し、セッション状態のみで管理
+
+**検証:**
+- ローカル環境：既に正常動作（Streamlitバージョンの違い？）
+- VPS環境：修正前は空白、修正後はコメント表示 ✅
+
+**コミット:** `9b7c9e4f`
+
+**結果:** ✅ VPS本番環境でAI画像コメント生成・表示が完全に動作
+
+---
+
 ## 🔧 技術的実装詳細
 
 ### Secret Manager SDK追加
@@ -178,21 +299,33 @@ x-api-{account_id}
 
 ## 📊 変更ファイル一覧
 
-### 変更ファイル
+### コミット1: d7b8b59a
+**変更ファイル:**
 1. **app.py** - Secret Manager自動同期機能追加・quick_approve修正・import os削除
 2. **requirements.txt** - google-cloud-secret-manager追加
+3. **auto-deploy.sh** - ブランチをclean-productionに修正
 
-### 削除ファイル
-3. **/docs/** - 全32ファイル削除（重要4ファイルは移動）
+**削除ファイル:**
+4. **/docs/** - 全32ファイル削除（重要4ファイルは移動）
 
-### 移動ファイル
-4. **DB_SYNC_AUTOMATION_LEVELS.md** → /directories/docs/
-5. **DB_SYNC_STRATEGY.md** → /directories/docs/
-6. **VPS_PRODUCTION_DEPLOYMENT_GUIDE.md** → /directories/docs/
-7. **VPS_REMOTE_OPERATION_GUIDE.md** → /directories/docs/
+**移動ファイル:**
+5. **DB_SYNC_AUTOMATION_LEVELS.md** → /directories/docs/
+6. **DB_SYNC_STRATEGY.md** → /directories/docs/
+7. **VPS_PRODUCTION_DEPLOYMENT_GUIDE.md** → /directories/docs/
+8. **VPS_REMOTE_OPERATION_GUIDE.md** → /directories/docs/
 
-### 復元ファイル
-8. **cloud_functions/x_poster/main.py** - 元の状態に復元
+**復元ファイル:**
+9. **cloud_functions/x_poster/main.py** - 元の状態に復元
+
+### コミット2: b225fc73
+**追加ファイル:**
+1. **ai_image_db.py** (8,201 bytes) - 画像DB管理モジュール
+2. **ai_image_cloud_functions.py** (7,902 bytes) - Cloud Functions連携
+3. **aicast_images.db** (32,768 bytes) - 画像データベース
+
+### コミット3: 9b7c9e4f
+**変更ファイル:**
+1. **app.py** - st.text_areaセッション状態管理修正（AI画像投稿コメント表示）
 
 ---
 
@@ -245,7 +378,8 @@ x-api-{account_id}
 
 ## 📝 コミット情報
 
-### コミットメッセージ
+### コミット1: Secret Manager自動同期 & 投稿承認日修正
+**コミットハッシュ:** `d7b8b59a`
 ```
 feat: Secret Manager自動同期機能追加 & 投稿承認日修正
 
@@ -258,18 +392,43 @@ feat: Secret Manager自動同期機能追加 & 投稿承認日修正
 - cloud_functions/x_poster/main.py を元に戻す
 ```
 
+### コミット2: AI画像投稿依存ファイル追加
+**コミットハッシュ:** `b225fc73`
+```
+fix: AI画像投稿機能の依存ファイル追加
+
+- ai_image_db.py 追加（画像DB管理モジュール）
+- ai_image_cloud_functions.py 追加（Cloud Functions連携）
+- aicast_images.db 追加（画像データベース）
+- auto-deploy.sh のブランチをclean-productionに修正
+
+VPS本番環境での「No module named 'ai_image_db'」エラーを解消
+```
+
+### コミット3: AI画像コメント表示修正
+**コミットハッシュ:** `9b7c9e4f`
+```
+fix: AI画像投稿のコメント表示問題を修正
+
+- st.text_areaのセッション状態管理を改善
+- auto_caption更新時にtweet_content_for_imageも自動更新
+- VPS環境でのコメント表示問題を解消
+```
+
 ### 影響範囲
 - **MCF機能:** X API投稿の信頼性向上（Secret Manager自動同期）
-- **内部処理:** 投稿承認フローの安定性向上
+- **内部処理:** 投稿承認フローの安定性向上、AI画像投稿機能の完全動作
 - **開発環境:** ドキュメント構造の明確化
 - **依存関係:** Secret Manager SDK追加
+- **VPS本番環境:** AI画像投稿機能が完全に動作
 
 ---
 
 ## 🔄 今後の展開
 
 ### 短期（今週中）
-- [ ] 本番環境でのSecret Manager自動同期テスト
+- [x] 本番環境でのSecret Manager自動同期テスト ✅
+- [x] AI画像投稿機能のVPS環境動作確認 ✅
 - [ ] 全キャストのSecret Manager同期状態確認
 - [ ] 新規アカウント登録フローの完全テスト
 
@@ -277,11 +436,13 @@ feat: Secret Manager自動同期機能追加 & 投稿承認日修正
 - [ ] Secret Manager監視・アラート設定
 - [ ] 認証情報の定期的な健全性チェック
 - [ ] ドキュメントの更新（Secret Manager運用ガイド）
+- [ ] AI画像投稿機能の本格運用開始
 
 ### 長期（来月以降）
 - [ ] Secret Managerのバージョン管理戦略確立
 - [ ] 複数環境（dev/staging/prod）対応
 - [ ] 認証情報のローテーション自動化
+- [ ] AI画像生成機能（Vertex AI Imagen）の実装
 
 ---
 
