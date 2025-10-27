@@ -5527,8 +5527,29 @@ def main():
                                             csv_lines = [line.rstrip() for line in csv_raw.split('\n') if line.strip()]
                                             csv_content = '\n'.join(csv_lines)
                                             
-                                            st.session_state[f'parsed_posts_csv_{selected_cast_id}'] = csv_content
+                                            # セッションステートに保存
+                                            session_key = f'parsed_posts_csv_{selected_cast_id}'
+                                            st.session_state[session_key] = csv_content
+                                            
                                             extraction_results.append(f"✅ サンプル投稿を抽出 ({len(csv_lines)}件)")
+                                            
+                                            # デバッグ: 保存確認
+                                            with st.expander("🔍 サンプル投稿抽出デバッグ", expanded=False):
+                                                st.write(f"セッションキー: {session_key}")
+                                                st.write(f"保存済み: {session_key in st.session_state}")
+                                                st.write(f"データ長: {len(csv_content)} 文字")
+                                                st.write(f"行数: {len(csv_lines)} 行")
+                                                st.code(csv_content[:300] + "..." if len(csv_content) > 300 else csv_content)
+                                        else:
+                                            st.warning("⚠️ サンプル投稿のCSVが見つかりませんでした")
+                                            with st.expander("検索パターン確認"):
+                                                st.code("r'Category,Post[_\\s]?Content\\s*\\n(.*?)(?=\\n\\n---|\\n\\n##|\\Z)'")
+                                                st.write("テキスト内の 'Category,Post' を検索:")
+                                                if 'Category,Post' in bulk_text:
+                                                    idx = bulk_text.find('Category,Post')
+                                                    st.code(bulk_text[max(0, idx-50):idx+200])
+                                                else:
+                                                    st.error("'Category,Post' が見つかりません")
                                         
                                         if extraction_results:
                                             st.success("✅ テキストから情報を抽出しました！")
@@ -5570,10 +5591,25 @@ def main():
                         edit_profile = st.text_area("サンプルプロフィール", value=profile_val, key=f"edit_profile_{selected_cast_id}", height=100)
                         
                         # サンプル投稿一括インポート機能
-                        if f'parsed_posts_csv_{selected_cast_id}' in st.session_state:
-                            st.markdown("---")
-                            st.markdown("### 📊 抽出されたサンプル投稿")
-                            csv_content = st.session_state[f'parsed_posts_csv_{selected_cast_id}']
+                        st.markdown("---")
+                        st.markdown("### 📊 サンプル投稿管理")
+                        
+                        # デバッグ: セッションステート確認
+                        parsed_posts_key = f'parsed_posts_csv_{selected_cast_id}'
+                        
+                        # デバッグ表示（開発中のみ）
+                        with st.expander("🔍 デバッグ情報", expanded=False):
+                            st.write(f"キャストID: {selected_cast_id}")
+                            st.write(f"セッションステートキー: {parsed_posts_key}")
+                            st.write(f"キーが存在: {parsed_posts_key in st.session_state}")
+                            if parsed_posts_key in st.session_state:
+                                csv_data = st.session_state[parsed_posts_key]
+                                st.write(f"データ長: {len(csv_data)} 文字")
+                                st.write(f"行数: {len(csv_data.split(chr(10)))} 行")
+                        
+                        if parsed_posts_key in st.session_state:
+                            st.success("✅ サンプル投稿が抽出されています！")
+                            csv_content = st.session_state[parsed_posts_key]
                             
                             # プレビュー表示を改善
                             lines = [l for l in csv_content.strip().split('\n') if l.strip()]
@@ -5685,6 +5721,8 @@ def main():
                                 del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
                                 st.info("インポートをキャンセルしました")
                                 st.rerun()
+                        else:
+                            st.info("💡 テキスト一括インポートでサンプル投稿を抽出すると、ここにインポートボタンが表示されます")
                     
                     with character_edit_tab:
                         st.markdown("### キャラクター詳細設定")
