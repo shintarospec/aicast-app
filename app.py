@@ -5434,32 +5434,152 @@ def main():
                         col1, col2, col3 = st.columns(3)
                         edit_name = col1.text_input("ユーザー名*", value=cast_data['name'] or '', key=f"edit_name_{selected_cast_id}")
                         edit_nickname = col2.text_input("名前*", value=cast_data['nickname'] or '', key=f"edit_nickname_{selected_cast_id}")
-                        edit_age = col3.text_input("年齢*", value=str(cast_data['age']) if cast_data['age'] else '', key=f"edit_age_{selected_cast_id}")
+                        
+                        # 年齢：抽出データがあれば優先
+                        age_val = st.session_state.get(f'parsed_age_{selected_cast_id}', str(cast_data['age']) if cast_data['age'] else '')
+                        edit_age = col3.text_input("年齢*", value=age_val, key=f"edit_age_{selected_cast_id}")
                         
                         st.markdown("### 🔍 詳細ペルソナ")
+                        st.info("💡 運営指針タブの「テキスト一括インポート」で抽出したデータがある場合、自動反映されます")
+                        
                         with st.expander("詳細ペルソナを編集", expanded=True):
                             col1, col2 = st.columns(2)
-                            edit_archetype = col1.text_input("アーキタイプ", value=persona_data['archetype'] if persona_data and persona_data['archetype'] else '', key=f"edit_archetype_{selected_cast_id}")
-                            edit_occupation = col2.text_input("職業", value=persona_data['occupation'] if persona_data and persona_data['occupation'] else '', key=f"edit_occupation_{selected_cast_id}")
-                            edit_residence = col1.text_input("居住地", value=persona_data['residence'] if persona_data and persona_data['residence'] else '', key=f"edit_residence_{selected_cast_id}")
-                            edit_family = col2.text_input("家族構成", value=persona_data['family_structure'] if persona_data and persona_data['family_structure'] else '', key=f"edit_family_{selected_cast_id}")
-                            edit_quote = st.text_input("象徴的な一言", value=persona_data['symbolic_quote'] if persona_data and persona_data['symbolic_quote'] else '', key=f"edit_quote_{selected_cast_id}")
-                            edit_x_purpose = st.text_input("X利用目的", value=persona_data['x_usage_purpose'] if persona_data and persona_data['x_usage_purpose'] else '', key=f"edit_x_purpose_{selected_cast_id}")
-                            edit_behavior = st.text_area("行動パターン", value=persona_data['behavior_pattern'] if persona_data and persona_data['behavior_pattern'] else '', key=f"edit_behavior_{selected_cast_id}")
-                            edit_topics = st.text_input("関心トピック", value=persona_data['interested_topics'] if persona_data and persona_data['interested_topics'] else '', key=f"edit_topics_{selected_cast_id}")
-                            edit_pain = st.text_input("プラットフォーム不満", value=persona_data['platform_pain_points'] if persona_data and persona_data['platform_pain_points'] else '', key=f"edit_pain_{selected_cast_id}")
-                            edit_brand = st.text_input("ブランド関係", value=persona_data['brand_relationship'] if persona_data and persona_data['brand_relationship'] else '', key=f"edit_brand_{selected_cast_id}")
+                            
+                            # 各フィールド：抽出データがあれば優先、なければDB値
+                            archetype_val = st.session_state.get(f'parsed_archetype_{selected_cast_id}', persona_data['archetype'] if persona_data and persona_data['archetype'] else '')
+                            occupation_val = st.session_state.get(f'parsed_occupation_{selected_cast_id}', persona_data['occupation'] if persona_data and persona_data['occupation'] else '')
+                            residence_val = st.session_state.get(f'parsed_residence_{selected_cast_id}', persona_data['residence'] if persona_data and persona_data['residence'] else '')
+                            family_val = st.session_state.get(f'parsed_family_{selected_cast_id}', persona_data['family_structure'] if persona_data and persona_data['family_structure'] else '')
+                            quote_val = st.session_state.get(f'parsed_quote_{selected_cast_id}', persona_data['symbolic_quote'] if persona_data and persona_data['symbolic_quote'] else '')
+                            x_purpose_val = st.session_state.get(f'parsed_x_purpose_{selected_cast_id}', persona_data['x_usage_purpose'] if persona_data and persona_data['x_usage_purpose'] else '')
+                            behavior_val = st.session_state.get(f'parsed_behavior_{selected_cast_id}', persona_data['behavior_pattern'] if persona_data and persona_data['behavior_pattern'] else '')
+                            topics_val = st.session_state.get(f'parsed_topics_{selected_cast_id}', persona_data['interested_topics'] if persona_data and persona_data['interested_topics'] else '')
+                            pain_val = st.session_state.get(f'parsed_pain_{selected_cast_id}', persona_data['platform_pain_points'] if persona_data and persona_data['platform_pain_points'] else '')
+                            brand_val = st.session_state.get(f'parsed_brand_{selected_cast_id}', persona_data['brand_relationship'] if persona_data and persona_data['brand_relationship'] else '')
+                            
+                            edit_archetype = col1.text_input("アーキタイプ", value=archetype_val, key=f"edit_archetype_{selected_cast_id}")
+                            edit_occupation = col2.text_input("職業", value=occupation_val, key=f"edit_occupation_{selected_cast_id}")
+                            edit_residence = col1.text_input("居住地", value=residence_val, key=f"edit_residence_{selected_cast_id}")
+                            edit_family = col2.text_input("家族構成", value=family_val, key=f"edit_family_{selected_cast_id}")
+                            edit_quote = st.text_input("象徴的な一言", value=quote_val, key=f"edit_quote_{selected_cast_id}")
+                            edit_x_purpose = st.text_input("X利用目的", value=x_purpose_val, key=f"edit_x_purpose_{selected_cast_id}")
+                            edit_behavior = st.text_area("行動パターン", value=behavior_val, key=f"edit_behavior_{selected_cast_id}")
+                            edit_topics = st.text_input("関心トピック", value=topics_val, key=f"edit_topics_{selected_cast_id}")
+                            edit_pain = st.text_input("プラットフォーム不満", value=pain_val, key=f"edit_pain_{selected_cast_id}")
+                            edit_brand = st.text_input("ブランド関係", value=brand_val, key=f"edit_brand_{selected_cast_id}")
                     
                     with mission_edit_tab:
-                        st.markdown("### アカウント運営指針")
-                        edit_mission = st.text_area("運営ミッション", value=mission_data['mission'] if mission_data and mission_data['mission'] else '', key=f"edit_mission_{selected_cast_id}", height=100)
-                        edit_persona_design = st.text_area("ペルソナ設計意図", value=mission_data['persona_design'] if mission_data and mission_data['persona_design'] else '', key=f"edit_persona_design_{selected_cast_id}", height=100)
-                        edit_content = st.text_area("コンテンツ戦略", value=mission_data['content_strategy'] if mission_data and mission_data['content_strategy'] else '', key=f"edit_content_{selected_cast_id}", height=100)
-                        edit_goal = st.text_area("最終目標", value=mission_data['final_goal'] if mission_data and mission_data['final_goal'] else '', key=f"edit_goal_{selected_cast_id}", height=100)
-                        edit_notes = st.text_area("補足事項", value=mission_data['additional_notes'] if mission_data and mission_data['additional_notes'] else '', key=f"edit_notes_{selected_cast_id}", height=100)
+                        st.markdown("### 📋 テキスト一括インポート")
+                        st.info("💡 アカウント運営指針のドキュメント全文を貼り付けると、該当項目を自動抽出してフォームに反映します")
+                        
+                        with st.expander("📝 テキスト一括インポートフォーム", expanded=False):
+                            bulk_text = st.text_area(
+                                "アカウント運営指針ドキュメントをコピペ",
+                                placeholder="## **アカウント運営指針**\n\nから始まるドキュメント全文を貼り付けてください",
+                                height=300,
+                                key=f"bulk_import_{selected_cast_id}"
+                            )
+                            
+                            if st.button("🔄 テキストから自動抽出して反映", key=f"parse_bulk_{selected_cast_id}"):
+                                if bulk_text:
+                                    try:
+                                        import re
+                                        
+                                        # ペルソナ設定から詳細ペルソナを抽出（CSV形式）
+                                        persona_csv_match = re.search(r'ID,名前,年齢.*?\n(\d+,.*?)(?=\n\n|$)', bulk_text, re.DOTALL)
+                                        if persona_csv_match:
+                                            csv_line = persona_csv_match.group(1).strip()
+                                            parts = csv_line.split(',')
+                                            if len(parts) >= 14:
+                                                # セッションステートに値を保存（次のリロードで反映）
+                                                st.session_state[f'parsed_age_{selected_cast_id}'] = parts[2].strip()
+                                                st.session_state[f'parsed_archetype_{selected_cast_id}'] = parts[3].strip()
+                                                st.session_state[f'parsed_occupation_{selected_cast_id}'] = parts[4].strip()
+                                                st.session_state[f'parsed_residence_{selected_cast_id}'] = parts[5].strip()
+                                                st.session_state[f'parsed_family_{selected_cast_id}'] = parts[6].strip()
+                                                st.session_state[f'parsed_quote_{selected_cast_id}'] = parts[7].strip().replace('"', '')
+                                                st.session_state[f'parsed_x_purpose_{selected_cast_id}'] = parts[8].strip()
+                                                st.session_state[f'parsed_behavior_{selected_cast_id}'] = parts[9].strip()
+                                                st.session_state[f'parsed_topics_{selected_cast_id}'] = parts[10].strip()
+                                                # parts[11]は主なフォロー対象（不要）
+                                                st.session_state[f'parsed_pain_{selected_cast_id}'] = parts[12].strip() if len(parts) > 12 else ''
+                                                st.session_state[f'parsed_brand_{selected_cast_id}'] = parts[13].strip() if len(parts) > 13 else ''
+                                        
+                                        # サンプルプロフィールを抽出
+                                        profile_match = re.search(r'## \*\*サンプルプロフィール\*\*.*?プロフィール:\s*\n(.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
+                                        if profile_match:
+                                            st.session_state[f'parsed_profile_{selected_cast_id}'] = profile_match.group(1).strip()
+                                        
+                                        # サンプル投稿をCSV形式から抽出
+                                        posts_csv_match = re.search(r'Category,Post_Content\s*\n(.*?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
+                                        if posts_csv_match:
+                                            csv_content = posts_csv_match.group(1).strip()
+                                            st.session_state[f'parsed_posts_csv_{selected_cast_id}'] = csv_content
+                                        
+                                        st.success("✅ テキストから情報を抽出しました！下のフォームを確認してください")
+                                        st.info("💡 抽出した内容を確認・編集後、「💾 更新」ボタンで保存してください")
+                                        st.rerun()
+                                        
+                                    except Exception as e:
+                                        st.error(f"❌ 抽出エラー: {str(e)}")
+                                        st.info("テキストの形式を確認してください")
+                                else:
+                                    st.warning("テキストを入力してください")
+                        
+                        st.markdown("---")
+                        st.markdown("### 📝 アカウント運営指針（個別編集）")
+                        
+                        # 抽出データがあれば反映
+                        mission_val = mission_data['mission'] if mission_data and mission_data['mission'] else ''
+                        persona_design_val = mission_data['persona_design'] if mission_data and mission_data['persona_design'] else ''
+                        content_val = mission_data['content_strategy'] if mission_data and mission_data['content_strategy'] else ''
+                        goal_val = mission_data['final_goal'] if mission_data and mission_data['final_goal'] else ''
+                        notes_val = mission_data['additional_notes'] if mission_data and mission_data['additional_notes'] else ''
+                        profile_val = st.session_state.get(f'parsed_profile_{selected_cast_id}', profile_data['profile_text'] if profile_data and profile_data['profile_text'] else '')
+                        
+                        edit_mission = st.text_area("運営ミッション", value=mission_val, key=f"edit_mission_{selected_cast_id}", height=100)
+                        edit_persona_design = st.text_area("ペルソナ設計意図", value=persona_design_val, key=f"edit_persona_design_{selected_cast_id}", height=100)
+                        edit_content = st.text_area("コンテンツ戦略", value=content_val, key=f"edit_content_{selected_cast_id}", height=100)
+                        edit_goal = st.text_area("最終目標", value=goal_val, key=f"edit_goal_{selected_cast_id}", height=100)
+                        edit_notes = st.text_area("補足事項", value=notes_val, key=f"edit_notes_{selected_cast_id}", height=100)
                         
                         st.markdown("### サンプルプロフィール")
-                        edit_profile = st.text_area("サンプルプロフィール", value=profile_data['profile_text'] if profile_data and profile_data['profile_text'] else '', key=f"edit_profile_{selected_cast_id}", height=100)
+                        edit_profile = st.text_area("サンプルプロフィール", value=profile_val, key=f"edit_profile_{selected_cast_id}", height=100)
+                        
+                        # サンプル投稿一括インポート機能
+                        if f'parsed_posts_csv_{selected_cast_id}' in st.session_state:
+                            st.markdown("---")
+                            st.markdown("### 📊 抽出されたサンプル投稿")
+                            csv_content = st.session_state[f'parsed_posts_csv_{selected_cast_id}']
+                            st.text_area("抽出されたCSV", value=csv_content, height=200, disabled=True, key=f"preview_posts_{selected_cast_id}")
+                            
+                            if st.button("📥 サンプル投稿を一括インポート", key=f"import_posts_{selected_cast_id}"):
+                                try:
+                                    lines = csv_content.strip().split('\n')
+                                    imported_count = 0
+                                    
+                                    # 既存のサンプル投稿を削除
+                                    execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
+                                    
+                                    for line in lines:
+                                        if not line.strip():
+                                            continue
+                                        parts = line.split(',', 1)  # カテゴリと内容を分割
+                                        if len(parts) == 2:
+                                            category = parts[0].strip().replace('"', '')
+                                            content = parts[1].strip().replace('"', '')
+                                            execute_query(
+                                                "INSERT INTO sample_posts (cast_id, category, post_content, sort_order) VALUES (?, ?, ?, ?)",
+                                                (selected_cast_id, category, content, imported_count)
+                                            )
+                                            imported_count += 1
+                                    
+                                    # セッションステートをクリア
+                                    del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
+                                    st.success(f"✅ {imported_count}件のサンプル投稿をインポートしました！")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ インポートエラー: {str(e)}")
                     
                     with character_edit_tab:
                         st.markdown("### キャラクター詳細設定")
@@ -5592,6 +5712,26 @@ def main():
                                 if edit_api_key:
                                     save_cast_x_credentials(selected_cast_id, edit_api_key, edit_api_secret, edit_bearer,
                                                           edit_access, edit_access_secret, edit_username, edit_user_id)
+                                
+                                # セッションステートのクリア（抽出データ）
+                                keys_to_clear = [
+                                    f'parsed_age_{selected_cast_id}',
+                                    f'parsed_archetype_{selected_cast_id}',
+                                    f'parsed_occupation_{selected_cast_id}',
+                                    f'parsed_residence_{selected_cast_id}',
+                                    f'parsed_family_{selected_cast_id}',
+                                    f'parsed_quote_{selected_cast_id}',
+                                    f'parsed_x_purpose_{selected_cast_id}',
+                                    f'parsed_behavior_{selected_cast_id}',
+                                    f'parsed_topics_{selected_cast_id}',
+                                    f'parsed_pain_{selected_cast_id}',
+                                    f'parsed_brand_{selected_cast_id}',
+                                    f'parsed_profile_{selected_cast_id}',
+                                    f'parsed_posts_csv_{selected_cast_id}'
+                                ]
+                                for key in keys_to_clear:
+                                    if key in st.session_state:
+                                        del st.session_state[key]
                                 
                                 st.session_state.cast_import_message = ("success", f"✅ キャスト「{edit_name}（{edit_nickname}）」を更新しました！")
                                 st.rerun()
