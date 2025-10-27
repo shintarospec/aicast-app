@@ -5520,13 +5520,15 @@ def main():
                                             extraction_results.append("✅ サンプルプロフィールを抽出")
                                         
                                         # サンプル投稿をCSV形式から抽出（ダブルクオート対応）
-                                        posts_csv_match = re.search(r'Category,Post[_\s]Content\s*\n((?:.+\n?)+?)(?=\n\n---|\Z)', bulk_text, re.DOTALL)
+                                        posts_csv_match = re.search(r'Category,Post[_\s]?Content\s*\n(.*?)(?=\n\n---|\n\n##|\Z)', bulk_text, re.DOTALL)
                                         if posts_csv_match:
-                                            csv_content = posts_csv_match.group(1).strip()
-                                            # 抽出した投稿数をカウント
-                                            post_lines = [l for l in csv_content.split('\n') if l.strip()]
+                                            csv_raw = posts_csv_match.group(1).strip()
+                                            # 各行の末尾の空白を削除して正規化
+                                            csv_lines = [line.rstrip() for line in csv_raw.split('\n') if line.strip()]
+                                            csv_content = '\n'.join(csv_lines)
+                                            
                                             st.session_state[f'parsed_posts_csv_{selected_cast_id}'] = csv_content
-                                            extraction_results.append(f"✅ サンプル投稿を抽出 ({len(post_lines)}件)")
+                                            extraction_results.append(f"✅ サンプル投稿を抽出 ({len(csv_lines)}件)")
                                         
                                         if extraction_results:
                                             st.success("✅ テキストから情報を抽出しました！")
@@ -5630,6 +5632,10 @@ def main():
                                     
                                     for idx, row in enumerate(csv_reader, 1):
                                         try:
+                                            # 空行をスキップ
+                                            if not row or (len(row) == 1 and not row[0].strip()):
+                                                continue
+                                                
                                             if len(row) >= 2:
                                                 category = row[0].strip()
                                                 content = row[1].strip()
@@ -5641,26 +5647,34 @@ def main():
                                                     )
                                                     imported_count += 1
                                                 else:
-                                                    errors.append(f"行{idx}: カテゴリまたは内容が空")
-                                            else:
-                                                errors.append(f"行{idx}: フォーマットエラー（列数不足）")
+                                                    if category or content:  # 完全に空でない場合のみエラー記録
+                                                        errors.append(f"行{idx}: カテゴリまたは内容が空")
+                                            elif len(row) == 1 and row[0].strip():
+                                                # 1列のみでデータがある場合
+                                                errors.append(f"行{idx}: フォーマットエラー（列数不足） - {row[0][:30]}...")
                                         except Exception as row_error:
                                             errors.append(f"行{idx}: {str(row_error)}")
                                     
                                     # セッションステートをクリア
                                     del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
                                     
-                                    if errors:
+                                    if errors and len(errors) < 10:  # エラーが少ない場合のみ表示
                                         st.warning(f"⚠️ {len(errors)}件のエラーがありました")
+                                        with st.expander("エラー詳細"):
+                                            for err in errors:
+                                                st.text(err)
+                                    elif errors:
+                                        st.warning(f"⚠️ {len(errors)}件のエラーがありました（最初の10件のみ表示）")
                                         with st.expander("エラー詳細"):
                                             for err in errors[:10]:
                                                 st.text(err)
-                                            if len(errors) > 10:
-                                                st.text(f"...他 {len(errors) - 10}件")
                                     
-                                    st.success(f"✅ {imported_count}件のサンプル投稿をインポートしました！")
-                                    st.balloons()
-                                    st.rerun()
+                                    if imported_count > 0:
+                                        st.success(f"✅ {imported_count}件のサンプル投稿をインポートしました！")
+                                        st.balloons()
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ インポートできた投稿が0件です。CSVの形式を確認してください。")
                                 except Exception as e:
                                     st.error(f"❌ インポートエラー: {str(e)}")
                                     import traceback
