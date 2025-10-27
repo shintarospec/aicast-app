@@ -5484,45 +5484,66 @@ def main():
                                 if bulk_text:
                                     try:
                                         import re
+                                        extraction_results = []
                                         
                                         # ペルソナ設定から詳細ペルソナを抽出（CSV形式）
-                                        persona_csv_match = re.search(r'ID,名前,年齢.*?\n(\d+,.*?)(?=\n\n|$)', bulk_text, re.DOTALL)
+                                        persona_csv_match = re.search(r'ID,名前,年齢.*?\n(\d+,.+?)(?=\n\n|---)', bulk_text, re.DOTALL)
                                         if persona_csv_match:
                                             csv_line = persona_csv_match.group(1).strip()
-                                            parts = csv_line.split(',')
+                                            # CSVパース（引用符内のカンマを考慮）
+                                            import csv
+                                            from io import StringIO
+                                            reader = csv.reader(StringIO(csv_line))
+                                            parts = next(reader)
+                                            
                                             if len(parts) >= 14:
-                                                # セッションステートに値を保存（次のリロードで反映）
+                                                # セッションステートに値を保存
                                                 st.session_state[f'parsed_age_{selected_cast_id}'] = parts[2].strip()
                                                 st.session_state[f'parsed_archetype_{selected_cast_id}'] = parts[3].strip()
                                                 st.session_state[f'parsed_occupation_{selected_cast_id}'] = parts[4].strip()
                                                 st.session_state[f'parsed_residence_{selected_cast_id}'] = parts[5].strip()
                                                 st.session_state[f'parsed_family_{selected_cast_id}'] = parts[6].strip()
-                                                st.session_state[f'parsed_quote_{selected_cast_id}'] = parts[7].strip().replace('"', '')
+                                                st.session_state[f'parsed_quote_{selected_cast_id}'] = parts[7].strip()
                                                 st.session_state[f'parsed_x_purpose_{selected_cast_id}'] = parts[8].strip()
                                                 st.session_state[f'parsed_behavior_{selected_cast_id}'] = parts[9].strip()
                                                 st.session_state[f'parsed_topics_{selected_cast_id}'] = parts[10].strip()
-                                                # parts[11]は主なフォロー対象（不要）
+                                                # parts[11]は主なフォロー対象（スキップ）
                                                 st.session_state[f'parsed_pain_{selected_cast_id}'] = parts[12].strip() if len(parts) > 12 else ''
                                                 st.session_state[f'parsed_brand_{selected_cast_id}'] = parts[13].strip() if len(parts) > 13 else ''
+                                                extraction_results.append("✅ ペルソナ情報を抽出")
                                         
-                                        # サンプルプロフィールを抽出
-                                        profile_match = re.search(r'## \*\*サンプルプロフィール\*\*.*?プロフィール:\s*\n(.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
+                                        # サンプルプロフィールを抽出（複数パターンに対応）
+                                        # パターン1: プロフィール:\n
+                                        profile_match = re.search(r'プロフィール:\s*\n(.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
                                         if profile_match:
                                             st.session_state[f'parsed_profile_{selected_cast_id}'] = profile_match.group(1).strip()
+                                            extraction_results.append("✅ サンプルプロフィールを抽出")
                                         
-                                        # サンプル投稿をCSV形式から抽出
-                                        posts_csv_match = re.search(r'Category,Post_Content\s*\n(.*?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
+                                        # サンプル投稿をCSV形式から抽出（ダブルクオート対応）
+                                        posts_csv_match = re.search(r'Category,Post[_\s]Content\s*\n((?:.+\n?)+?)(?=\n\n---|\Z)', bulk_text, re.DOTALL)
                                         if posts_csv_match:
                                             csv_content = posts_csv_match.group(1).strip()
+                                            # 抽出した投稿数をカウント
+                                            post_lines = [l for l in csv_content.split('\n') if l.strip()]
                                             st.session_state[f'parsed_posts_csv_{selected_cast_id}'] = csv_content
+                                            extraction_results.append(f"✅ サンプル投稿を抽出 ({len(post_lines)}件)")
                                         
-                                        st.success("✅ テキストから情報を抽出しました！下のフォームを確認してください")
-                                        st.info("💡 抽出した内容を確認・編集後、「💾 更新」ボタンで保存してください")
+                                        if extraction_results:
+                                            st.success("✅ テキストから情報を抽出しました！")
+                                            for result in extraction_results:
+                                                st.write(result)
+                                            st.info("💡 下のフォームで内容を確認し、サンプル投稿は「📥 一括インポート」ボタンでDBに登録してください")
+                                        else:
+                                            st.warning("⚠️ 抽出できる情報が見つかりませんでした。テキストの形式を確認してください。")
+                                        
                                         st.rerun()
                                         
                                     except Exception as e:
                                         st.error(f"❌ 抽出エラー: {str(e)}")
                                         st.info("テキストの形式を確認してください")
+                                        import traceback
+                                        with st.expander("詳細エラー"):
+                                            st.code(traceback.format_exc())
                                 else:
                                     st.warning("テキストを入力してください")
                         
@@ -5551,35 +5572,105 @@ def main():
                             st.markdown("---")
                             st.markdown("### 📊 抽出されたサンプル投稿")
                             csv_content = st.session_state[f'parsed_posts_csv_{selected_cast_id}']
-                            st.text_area("抽出されたCSV", value=csv_content, height=200, disabled=True, key=f"preview_posts_{selected_cast_id}")
                             
-                            if st.button("📥 サンプル投稿を一括インポート", key=f"import_posts_{selected_cast_id}"):
+                            # プレビュー表示を改善
+                            lines = [l for l in csv_content.strip().split('\n') if l.strip()]
+                            st.info(f"📋 抽出件数: **{len(lines)}件** のサンプル投稿が見つかりました")
+                            
+                            # カテゴリごとに整理してプレビュー
+                            with st.expander("📝 抽出内容プレビュー", expanded=True):
+                                preview_data = []
                                 try:
-                                    lines = csv_content.strip().split('\n')
+                                    import csv
+                                    from io import StringIO
+                                    csv_reader = csv.reader(StringIO(csv_content))
+                                    
+                                    for idx, row in enumerate(csv_reader):
+                                        if idx >= 10:  # 最初の10件のみ
+                                            break
+                                        if len(row) >= 2:
+                                            category = row[0].strip()
+                                            content = row[1].strip()
+                                            preview_data.append({
+                                                "カテゴリ": category, 
+                                                "投稿内容": content[:50] + "..." if len(content) > 50 else content
+                                            })
+                                except Exception as e:
+                                    st.error(f"プレビューエラー: {str(e)}")
+                                
+                                if preview_data:
+                                    import pandas as pd
+                                    df = pd.DataFrame(preview_data)
+                                    st.dataframe(df, use_container_width=True)
+                                    
+                                    if len(lines) > 10:
+                                        st.caption(f"...他 {len(lines) - 10}件")
+                                else:
+                                    st.warning("プレビューできるデータがありません")
+                            
+                            # 詳細CSV表示
+                            with st.expander("🔍 CSVデータ全文", expanded=False):
+                                st.text_area("抽出されたCSV", value=csv_content, height=200, disabled=True, key=f"preview_posts_{selected_cast_id}")
+                            
+                            col1, col2 = st.columns([2, 1])
+                            
+                            if col1.button("📥 サンプル投稿を一括インポート", type="primary", key=f"import_posts_{selected_cast_id}"):
+                                try:
+                                    import csv
+                                    from io import StringIO
+                                    
                                     imported_count = 0
+                                    errors = []
                                     
                                     # 既存のサンプル投稿を削除
                                     execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
                                     
-                                    for line in lines:
-                                        if not line.strip():
-                                            continue
-                                        parts = line.split(',', 1)  # カテゴリと内容を分割
-                                        if len(parts) == 2:
-                                            category = parts[0].strip().replace('"', '')
-                                            content = parts[1].strip().replace('"', '')
-                                            execute_query(
-                                                "INSERT INTO sample_posts (cast_id, category, post_content, sort_order) VALUES (?, ?, ?, ?)",
-                                                (selected_cast_id, category, content, imported_count)
-                                            )
-                                            imported_count += 1
+                                    # CSVとして正しくパース（引用符内のカンマを考慮）
+                                    csv_reader = csv.reader(StringIO(csv_content))
+                                    
+                                    for idx, row in enumerate(csv_reader, 1):
+                                        try:
+                                            if len(row) >= 2:
+                                                category = row[0].strip()
+                                                content = row[1].strip()
+                                                
+                                                if category and content:
+                                                    execute_query(
+                                                        "INSERT INTO sample_posts (cast_id, category, post_content, sort_order) VALUES (?, ?, ?, ?)",
+                                                        (selected_cast_id, category, content, imported_count)
+                                                    )
+                                                    imported_count += 1
+                                                else:
+                                                    errors.append(f"行{idx}: カテゴリまたは内容が空")
+                                            else:
+                                                errors.append(f"行{idx}: フォーマットエラー（列数不足）")
+                                        except Exception as row_error:
+                                            errors.append(f"行{idx}: {str(row_error)}")
                                     
                                     # セッションステートをクリア
                                     del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
+                                    
+                                    if errors:
+                                        st.warning(f"⚠️ {len(errors)}件のエラーがありました")
+                                        with st.expander("エラー詳細"):
+                                            for err in errors[:10]:
+                                                st.text(err)
+                                            if len(errors) > 10:
+                                                st.text(f"...他 {len(errors) - 10}件")
+                                    
                                     st.success(f"✅ {imported_count}件のサンプル投稿をインポートしました！")
+                                    st.balloons()
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"❌ インポートエラー: {str(e)}")
+                                    import traceback
+                                    with st.expander("エラー詳細"):
+                                        st.code(traceback.format_exc())
+                            
+                            if col2.button("❌ キャンセル", key=f"cancel_posts_{selected_cast_id}"):
+                                del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
+                                st.info("インポートをキャンセルしました")
+                                st.rerun()
                     
                     with character_edit_tab:
                         st.markdown("### キャラクター詳細設定")
