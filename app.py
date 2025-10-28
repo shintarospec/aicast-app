@@ -282,8 +282,8 @@ cf_poster = CloudFunctionsPoster()
 pandas_lib = pd
 
 # 認証エラー用のヘルパー関数
-def get_guidance_advice(category_id=None):
-    """指針アドバイスを取得する関数"""
+def get_guidance_advice():
+    """グローバル指針アドバイスを取得する関数"""
     advice_parts = []
     
     # グローバル指針アドバイスを取得
@@ -297,27 +297,7 @@ def get_guidance_advice(category_id=None):
         for advice in global_advices:
             advice_parts.append(f"■ {advice['title']}: {advice['content']}")
     
-    # カテゴリ別指針アドバイスを取得（カテゴリIDが指定されている場合）
-    if category_id:
-        category_advices = execute_query(
-            "SELECT title, content FROM category_advice WHERE category_id = ? AND is_active = 1 ORDER BY sort_order, created_at",
-            (category_id,),
-            fetch="all"
-        )
-        
-        if category_advices:
-            # カテゴリ名も取得
-            category_name = execute_query(
-                "SELECT name FROM situation_categories WHERE id = ?",
-                (category_id,),
-                fetch="one"
-            )
-            category_display = category_name['name'] if category_name else f"カテゴリID:{category_id}"
-            
-            advice_parts.append(f"\n【{category_display}カテゴリ専用指針】")
-            for advice in category_advices:
-                advice_parts.append(f"■ {advice['title']}: {advice['content']}")
-    
+    return "\n".join(advice_parts) if advice_parts else ""
     return "\n".join(advice_parts) if advice_parts else ""
 
 def show_auth_error_guidance(error_msg, context="AI生成"):
@@ -407,11 +387,7 @@ def init_db():
     persona_columns = ", ".join([f"{field} TEXT" for field in PERSONA_FIELDS if field != 'name'])
     casts_table_query = f"CREATE TABLE IF NOT EXISTS casts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, {persona_columns})"
     posts_table_query = "CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, cast_id INTEGER, created_at TEXT, content TEXT, theme TEXT, evaluation TEXT, advice TEXT, free_advice TEXT, status TEXT DEFAULT 'draft', posted_at TEXT, sent_status TEXT DEFAULT 'not_sent', sent_at TEXT, generated_at TEXT, scheduled_at TEXT, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
-    situations_table_query = "CREATE TABLE IF NOT EXISTS situations (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE, time_slot TEXT DEFAULT 'いつでも', category_id INTEGER, FOREIGN KEY(category_id) REFERENCES situation_categories(id) ON DELETE CASCADE)"
-    categories_table_query = "CREATE TABLE IF NOT EXISTS situation_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)"
     advice_table_query = 'CREATE TABLE IF NOT EXISTS advice_master (id INTEGER PRIMARY KEY, content TEXT NOT NULL UNIQUE)'
-    groups_table_query = "CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, content TEXT NOT NULL)"
-    cast_groups_table_query = "CREATE TABLE IF NOT EXISTS cast_groups (cast_id INTEGER, group_id INTEGER, PRIMARY KEY (cast_id, group_id), FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE, FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE)"
     tuning_history_table_query = "CREATE TABLE IF NOT EXISTS tuning_history (id INTEGER PRIMARY KEY, post_id INTEGER, timestamp TEXT, previous_content TEXT, advice_used TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
     custom_fields_table_query = "CREATE TABLE IF NOT EXISTS custom_fields (id INTEGER PRIMARY KEY, field_name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, field_type TEXT DEFAULT 'text', placeholder TEXT DEFAULT '', is_required INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0)"
     send_history_table_query = "CREATE TABLE IF NOT EXISTS send_history (id INTEGER PRIMARY KEY, post_id INTEGER, destination TEXT, sent_at TEXT, scheduled_datetime TEXT, status TEXT DEFAULT 'pending', error_message TEXT, FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE)"
@@ -427,7 +403,7 @@ def init_db():
     sample_profiles_table_query = "CREATE TABLE IF NOT EXISTS sample_profiles (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, profile_text TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
     sample_posts_table_query = "CREATE TABLE IF NOT EXISTS sample_posts (id INTEGER PRIMARY KEY, cast_id INTEGER, category TEXT, post_content TEXT NOT NULL, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
 
-    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query, app_settings_table_query, global_advice_table_query, category_advice_table_query, cast_x_credentials_table_query, cast_sheets_config_table_query, account_mission_table_query, persona_detailed_table_query, sample_profiles_table_query, sample_posts_table_query]
+    queries = [casts_table_query, posts_table_query, advice_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query, app_settings_table_query, global_advice_table_query, cast_x_credentials_table_query, cast_sheets_config_table_query, account_mission_table_query, persona_detailed_table_query, sample_profiles_table_query, sample_posts_table_query]
     for query in queries: execute_query(query)
     
     # generated_atカラムが存在しない場合は追加
@@ -464,22 +440,10 @@ def init_db():
         print(f"⚠️ persona_detailedカラム追加時のエラー: {e}")
         pass
     
-    if execute_query("SELECT COUNT(*) as c FROM situation_categories", fetch="one")['c'] == 0:
-        for cat in ["日常", "学生", "社会人", "イベント", "恋愛"]: execute_query("INSERT INTO situation_categories (name) VALUES (?)", (cat,))
-    
-    if execute_query("SELECT COUNT(*) as c FROM groups", fetch="one")['c'] == 0:
-        default_groups = [("喫茶アルタイル", "あなたは銀座の路地裏にある、星をテーマにした小さな喫茶店「アルタイル」の店員です。"), ("文芸サークル", "あなたは大学の文芸サークルに所属しています。")]
-        for group in default_groups: execute_query("INSERT INTO groups (name, content) VALUES (?, ?)", group)
-
     if not execute_query("SELECT id FROM casts WHERE name = ?", ("星野 詩織",), fetch="one"):
         default_cast_data = { "name": "星野 詩織", "nickname": "しおりん", "age": "21歳", "birthday": "10月26日", "birthplace": "神奈川県", "appearance": "黒髪ロングで物静かな雰囲気。古着のワンピースをよく着ている。", "personality": "物静かで穏やかな聞き上手", "strength": "人の話に深く共感できる", "weakness": "少し人見知り", "first_person": "私", "speech_style": "です・ます調の丁寧な言葉遣い", "catchphrase": "「なんだか、素敵ですね」", "customer_interaction": "お客様の心に寄り添うように、静かに話を聞く", "occupation": "文学部の女子大生", "hobby": "読書、フィルムカメラ、古い喫茶店巡り", "likes": "雨の日の匂い、万年筆のインク", "dislikes": "大きな音、人混み", "holiday_activity": "一日中家で本を読んでいるか、目的もなく電車に乗る", "dream": "自分の言葉で、誰かの心を動かす物語を紡ぐこと", "reason_for_job": "様々な人の物語に触れたいから", "secret": "実は、大のSF小説好き", "allowed_categories": "日常,学生,恋愛" }
         columns = ', '.join(default_cast_data.keys()); placeholders = ', '.join(['?'] * len(default_cast_data)); values = tuple(default_cast_data.values())
         execute_query(f"INSERT INTO casts ({columns}) VALUES ({placeholders})", values)
-
-    if execute_query("SELECT COUNT(*) as c FROM situations", fetch="one")['c'] == 0:
-        cat_rows = execute_query("SELECT id, name FROM situation_categories", fetch="all"); cat_map = {row['name']: row['id'] for row in cat_rows}
-        default_situations = [("静かな雨が降る夜", "夜", cat_map.get("日常")), ("気持ちの良い秋晴れの昼下がり", "昼", cat_map.get("日常")), ("お気に入りの喫茶店で読書中", "いつでも", cat_map.get("学生")), ("初めてのお給料日", "いつでも", cat_map.get("社会人"))]
-        for sit in default_situations: execute_query("INSERT INTO situations (content, time_slot, category_id) VALUES (?, ?, ?)", sit)
 
     if execute_query("SELECT COUNT(*) as c FROM advice_master", fetch="one")['c'] == 0:
         default_advice = [("もっと可愛く",), ("もっと大人っぽく",), ("意外な一面を見せて",), ("豆知識を加えて",), ("句読点を工夫して",), ("少しユーモアを",)]
@@ -490,7 +454,6 @@ def init_db():
         default_settings = [
             ("default_char_limit", "140", "デフォルト文字数制限", "投稿生成"),
             ("default_post_count", "5", "デフォルト生成数", "投稿生成"),
-            ("situation_placeholder", "例：お気に入りの喫茶店で読書中", "シチュエーション入力プレースホルダ", "UI設定"),
             ("campaign_placeholder", "例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。", "一斉指示プレースホルダ", "UI設定"),
             ("name_pairs_placeholder", "例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜", "名前ペア入力プレースホルダ", "UI設定"),
             ("ai_generation_instruction", "魅力的で個性豊かなキャラクター", "AI生成時のデフォルト指示", "AI設定"),
@@ -589,8 +552,6 @@ def initialize_default_settings():
 
 def format_persona(cast_id, cast_data):
     if not cast_data: return "ペルソナデータがありません。"
-    group_rows = execute_query("SELECT g.name, g.content FROM groups g JOIN cast_groups cg ON g.id = cg.group_id WHERE cg.cast_id = ?", (cast_id,), fetch="all")
-    group_text = "\n\n## 4. 所属グループ共通設定\n" + "".join([f"- **{row['name']}**: {row['content']}\n" for row in group_rows]) if group_rows else ""
     return f"""
 # キャラクター設定シート：{(cast_data['name'] if cast_data and 'name' in cast_data else '')}
 ## 1. 基本情報
@@ -599,7 +560,6 @@ def format_persona(cast_id, cast_data):
 - 性格: {(cast_data['personality'] if cast_data and 'personality' in cast_data else '')}, 長所: {(cast_data['strength'] if cast_data and 'strength' in cast_data else '')}, 短所: {(cast_data['weakness'] if cast_data and 'weakness' in cast_data else '')}, 一人称: {(cast_data['first_person'] if cast_data and 'first_person' in cast_data else '')}, 口調・語尾: {(cast_data['speech_style'] if cast_data and 'speech_style' in cast_data else '')}, 口癖: {(cast_data['catchphrase'] if cast_data and 'catchphrase' in cast_data else '')}, お客様への接し方: {(cast_data['customer_interaction'] if cast_data and 'customer_interaction' in cast_data else '')}
 ## 3. 背景ストーリー
 - 職業／学業: {(cast_data['occupation'] if cast_data and 'occupation' in cast_data else '')}, 趣味や特技: {(cast_data['hobby'] if cast_data and 'hobby' in cast_data else '')}, 好きなもの: {(cast_data['likes'] if cast_data and 'likes' in cast_data else '')}, 嫌いなもの: {(cast_data['dislikes'] if cast_data and 'dislikes' in cast_data else '')}, 休日の過ごし方: {(cast_data['holiday_activity'] if cast_data and 'holiday_activity' in cast_data else '')}, 将来の夢: {(cast_data['dream'] if cast_data and 'dream' in cast_data else '')}, なぜこの仕事をしているのか: {(cast_data['reason_for_job'] if cast_data and 'reason_for_job' in cast_data else '')}, ちょっとした秘密: {(cast_data['secret'] if cast_data and 'secret' in cast_data else '')}
-{group_text}
 """
 
 # =========================================
@@ -763,11 +723,12 @@ def build_full_prompt(cast_id, situation_or_instruction, char_limit=140, is_cust
     新プロンプト構造：
     1. 基本ペルソナ（必須3項目：name, nickname, age）
     2. アカウント運営指針（オプション）
-    3. 詳細ペルソナ（オプション）
-    4. サンプルプロフィール（オプション）
-    5. サンプル投稿（オプション）
-    6. シチュエーションまたは指示
-    7. 生成ルール
+    3. グローバル指針（オプション）
+    4. 詳細ペルソナ（オプション）
+    5. サンプルプロフィール（オプション）
+    6. サンプル投稿（オプション）
+    7. シチュエーションまたは指示
+    8. 生成ルール
     
     Args:
         cast_id: キャストID
@@ -791,31 +752,36 @@ def build_full_prompt(cast_id, situation_or_instruction, char_limit=140, is_cust
     if account_mission:
         sections.append(account_mission)
     
-    # 3. 詳細ペルソナ（オプション）
+    # 3. グローバル指針（オプション）
+    global_guidance = get_guidance_advice()
+    if global_guidance:
+        sections.append(f"## グローバル指針\n{global_guidance}")
+    
+    # 4. 詳細ペルソナ（オプション）
     detailed_persona = get_detailed_persona_prompt(cast_id)
     if detailed_persona:
         sections.append(detailed_persona)
     
-    # 4. サンプルプロフィール（オプション）
+    # 5. サンプルプロフィール（オプション）
     sample_profile = get_sample_profile_prompt(cast_id)
     if sample_profile:
         sections.append(sample_profile)
     
-    # 5. サンプル投稿（オプション）
+    # 6. サンプル投稿（オプション）
     sample_posts = get_sample_posts_prompt(cast_id)
     if sample_posts:
         sections.append(sample_posts)
     
-    # 6. シチュエーションまたは指示
+    # 7. シチュエーションまたは指示
     if is_custom_instruction:
         sections.append(f"## 投稿生成の指示\n{situation_or_instruction}")
     else:
         sections.append(f"## シチュエーション\n{situation_or_instruction}")
     
-    # 7. 生成ルール
+    # 8. 生成ルール
     generation_rules = f"""
 ## 生成ルール
-- 上記のキャラクター設定・運営指針・サンプルに基づいて投稿を生成してください
+- 上記のキャラクター設定・運営指針・グローバル指針・サンプルに基づいて投稿を生成してください
 - 文字数は{char_limit}文字以内に収めてください
 - サンプル投稿がある場合は、同じような雰囲気・トーン・スタイルで書いてください
 - 改行は適切に使用し、読みやすさを重視してください
@@ -2727,7 +2693,7 @@ def main():
                 st.rerun()
     
     # メニューの選択肢
-    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "キャスト管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
+    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "キャスト管理", "アドバイス管理", "指針アドバイス", "システム設定"]
     
     # 保存されたページを取得（リロード後の復帰用）
     saved_page = get_current_page()
@@ -3152,135 +3118,135 @@ def main():
             tab_auto, tab_custom = st.tabs(["🎲 自動生成", "✍️ 直接指示"])
             
             with tab_auto:
-                st.subheader("シチュエーションベース自動生成")
-                allowed_categories_str = selected_cast_details.get('allowed_categories', '')
-                allowed_categories = allowed_categories_str.split(',') if allowed_categories_str else []
-                # 存在しないカテゴリを除外
-                all_category_rows = execute_query("SELECT name FROM situation_categories", fetch="all")
-                existing_category_names = [row['name'] for row in all_category_rows] if all_category_rows else []
-                valid_allowed_categories = [cat for cat in allowed_categories if cat in existing_category_names]
+                st.subheader("サンプル投稿ベース自動生成")
+                st.info("💡 サンプル投稿を元に、同じスタイルの投稿を自動生成します。")
                 
-                if not valid_allowed_categories:
-                    if allowed_categories:
-                        st.warning(f"キャスト「{selected_cast_name}」に設定されたカテゴリが削除されています。「キャスト管理」で再設定してください。")
-                    else:
-                        st.warning(f"キャスト「{selected_cast_name}」に使用が許可されたカテゴリがありません。「キャスト管理」で設定してください。")
-                else:
-                    placeholders = ','.join('?' for _ in valid_allowed_categories)
-                    query = f"SELECT s.content, s.time_slot FROM situations s JOIN situation_categories sc ON s.category_id = sc.id WHERE sc.name IN ({placeholders})"
-                    situations_rows = execute_query(query, valid_allowed_categories, fetch="all")
-                    col1, col2 = st.columns(2)
-                    default_post_count = int(get_app_setting("default_post_count", "5"))
-                    num_posts = col1.number_input("生成する数", min_value=1, max_value=50, value=default_post_count, key="auto_post_num")
-                    default_char_limit = int(get_app_setting("default_char_limit", "140"))
-                    char_limit = col2.number_input("文字数（以内）", min_value=20, max_value=300, value=default_char_limit, key="auto_char_limit")
+                # sample_postsの存在確認
+                sample_posts_rows = execute_query(
+                    "SELECT category, post_content FROM sample_posts WHERE cast_id = ? ORDER BY sort_order, id",
+                    (selected_cast_id,),
+                    fetch="all"
+                )
+                
+                if not sample_posts_rows:
+                    st.warning("⚠️ サンプル投稿が登録されていません。")
+                    st.markdown("**サンプル投稿を登録してください:**")
+                    st.markdown("1. 「キャスト管理」ページを開く")
+                    st.markdown("2. このキャストの「サンプル投稿」タブで投稿例を登録")
+                    st.markdown("3. 登録後、こちらのページに戻って自動生成できます")
+                    st.stop()
+                
+                # サンプル投稿がある場合の生成UI
+                col1, col2 = st.columns(2)
+                default_post_count = int(get_app_setting("default_post_count", "5"))
+                num_posts = col1.number_input("生成する数", min_value=1, max_value=50, value=default_post_count, key="auto_post_num")
+                default_char_limit = int(get_app_setting("default_char_limit", "140"))
+                char_limit = col2.number_input("文字数（以内）", min_value=20, max_value=300, value=default_char_limit, key="auto_char_limit")
 
-                    if st.button("自動生成開始", type="primary", key="auto_generate"):
-                        if st.session_state.get('gemini_model'):
-                            if not situations_rows:
-                                st.error("キャストに許可されたカテゴリに属するシチュエーションがありません。"); st.stop()
-                            with top_status_placeholder:
-                                with st.spinner("投稿を生成中です..."):
-                                    persona_sheet = format_persona(selected_cast_id, selected_cast_details)
-                                    successful_posts = 0
-                                    error_occurred = False
-                                    error_message = None
+                if st.button("自動生成開始", type="primary", key="auto_generate"):
+                    if st.session_state.get('gemini_model'):
+                        with top_status_placeholder:
+                            with st.spinner("投稿を生成中です..."):
+                                successful_posts = 0
+                                error_occurred = False
+                                error_message = None
+                                
+                                for i in range(num_posts):
+                                    # sample_postsからランダムに選択
+                                    selected_sample = random.choice(sample_posts_rows)
+                                    instruction_text = selected_sample['post_content']
+                                    category_text = selected_sample['category'] or "一般"
+
+                                    # 新しいフルプロンプトを組み立て
+                                    prompt_template = build_full_prompt(selected_cast_id, instruction_text, char_limit=char_limit, is_custom_instruction=False)
                                     
-                                    for i in range(num_posts):
-                                        selected_situation = random.choice(situations_rows)
-                                        # まず sample_posts を優先してプロンプト指示を決定（新構造）。なければ既存のシチュエーションを使用
-                                        sample_posts_rows = execute_query(
-                                            "SELECT category, post_content FROM sample_posts WHERE cast_id = ? ORDER BY sort_order, id",
-                                            (selected_cast_id,),
-                                            fetch="all"
-                                        )
-                                        if sample_posts_rows:
-                                            # sample_posts がある場合はランダムで1件を指示に使う
-                                            selected_sample = random.choice(sample_posts_rows)
-                                            instruction_text = selected_sample['post_content'] if selected_sample else ''
-                                        else:
-                                            instruction_text = selected_situation['content'] if selected_situation else ''
-
-                                        # 新しいフルプロンプトを組み立て（フォールバックは build_full_prompt 内で実施）
-                                        prompt_template = build_full_prompt(selected_cast_id, instruction_text, char_limit=char_limit, is_custom_instruction=False)
-                                        
-                                        # リトライ機能付きAPI呼び出し
-                                        max_retries = 3
-                                        retry_delay = 10  # 秒
-                                        
-                                        for retry in range(max_retries):
-                                            try:
-                                                response = safe_generate_content(st.session_state.gemini_model, prompt_template)
-                                                generated_text = clean_generated_content(response.text)
-                                                time_slot_map = {"朝": (7, 11), "昼": (12, 17), "夜": (18, 23)}
-                                                hour_range = time_slot_map.get(selected_situation['time_slot'], (0, 23))
-                                                random_hour = random.randint(hour_range[0], hour_range[1]); random_minute = random.randint(0, 59)
-                                                created_at = datetime.datetime.now(JST).replace(hour=random_hour, minute=random_minute, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
-                                                generated_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                                execute_query("INSERT INTO posts (cast_id, created_at, content, theme, generated_at) VALUES (?, ?, ?, ?, ?)", (selected_cast_id, created_at, generated_text, selected_situation['content'], generated_at))
-                                                successful_posts += 1
-                                                break  # 成功したらリトライループを抜ける
-                                                
-                                            except Exception as e:
-                                                error_message = str(e)
-                                                
-                                                # 429エラーの場合はリトライ
-                                                if "429" in error_message or "Resource exhausted" in error_message:
-                                                    if retry < max_retries - 1:  # 最後のリトライでない場合
-                                                        st.info(f"⏱️ API制限により待機中... ({retry + 1}/{max_retries}回目のリトライ)")
-                                                        time.sleep(retry_delay * (retry + 1))  # 段階的に待機時間を増加
-                                                        continue
-                                                    else:
-                                                        error_occurred = True
-                                                        break
+                                    # リトライ機能付きAPI呼び出し
+                                    max_retries = 3
+                                    retry_delay = 10  # 秒
+                                    
+                                    for retry in range(max_retries):
+                                        try:
+                                            response = safe_generate_content(st.session_state.gemini_model, prompt_template)
+                                            generated_text = clean_generated_content(response.text)
+                                            
+                                            # ランダムな投稿時刻を生成（朝～夜の範囲）
+                                            random_hour = random.randint(7, 23)
+                                            random_minute = random.randint(0, 59)
+                                            created_at = datetime.datetime.now(JST).replace(hour=random_hour, minute=random_minute, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+                                            generated_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                            
+                                            # themeとしてカテゴリ情報を保存
+                                            theme_text = f"{category_text}"
+                                            
+                                            execute_query("INSERT INTO posts (cast_id, created_at, content, theme, generated_at) VALUES (?, ?, ?, ?, ?)", 
+                                                        (selected_cast_id, created_at, generated_text, theme_text, generated_at))
+                                            successful_posts += 1
+                                            break  # 成功したらリトライループを抜ける
+                                            
+                                        except Exception as e:
+                                            error_message = str(e)
+                                            
+                                            # 429エラーの場合はリトライ
+                                            if "429" in error_message or "Resource exhausted" in error_message:
+                                                if retry < max_retries - 1:  # 最後のリトライでない場合
+                                                    st.info(f"⏱️ API制限により待機中... ({retry + 1}/{max_retries}回目のリトライ)")
+                                                    time.sleep(retry_delay * (retry + 1))  # 段階的に待機時間を増加
+                                                    continue
                                                 else:
-                                                    # 429エラー以外は即座にエラー
                                                     error_occurred = True
                                                     break
+                                            else:
+                                                # 429エラー以外は即座にエラー
+                                                error_occurred = True
+                                                break
+                                    
+                                    if error_occurred:
+                                        break  # エラー時は投稿生成ループを抜ける
+                                    
+                                    # 成功時は短い間隔で次の投稿へ
+                                    time.sleep(2)
+                            
+                            # 結果に応じてメッセージを表示
+                            if error_occurred:
+                                # API制限エラーの特別処理
+                                if "429" in error_message or "Resource exhausted" in error_message:
+                                    top_status_placeholder.error("⏱️ API制限に達しました")
+                                    with st.expander("🔍 API制限エラーの解決方法", expanded=True):
+                                        st.warning("**429 Resource Exhausted エラー**")
+                                        st.markdown("""
+                                        **原因:** Google Cloud Vertex AIのAPI制限に達しています。
                                         
-                                        if error_occurred:
-                                            break  # エラー時は投稿生成ループを抜ける
+                                        **解決方法:**
+                                        1. **⏰ 待機**: 5-10分後に再試行してください
+                                        2. **📉 リクエスト数を減らす**: 生成する投稿数を減らしてください
+                                        3. **⏱️ 間隔を空ける**: 連続生成を避け、時間を空けて実行
                                         
-                                        # 成功時は短い間隔で次の投稿へ
-                                        time.sleep(2)
-                                # 結果に応じてメッセージを表示
-                                if error_occurred:
-                                    # API制限エラーの特別処理
-                                    if "429" in error_message or "Resource exhausted" in error_message:
-                                        top_status_placeholder.error("⏱️ API制限に達しました")
-                                        with st.expander("🔍 API制限エラーの解決方法", expanded=True):
-                                            st.warning("**429 Resource Exhausted エラー**")
-                                            st.markdown("""
-                                            **原因:** Google Cloud Vertex AIのAPI制限に達しています。
-                                            
-                                            **解決方法:**
-                                            1. **⏰ 待機**: 5-10分後に再試行してください
-                                            2. **📉 リクエスト数を減らす**: 生成する投稿数を減らしてください
-                                            3. **⏱️ 間隔を空ける**: 連続生成を避け、時間を空けて実行
-                                            
-                                            **💡 ヒント:**
-                                            - 一度に大量生成せず、数件ずつ分けて実行
-                                            - 他のユーザーと同じAPIを共有している可能性があります
-                                            
-                                            **🔗 詳細情報:**
-                                            [Google Cloud Vertex AI 制限について](https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429)
-                                            """)
-                                            
-                                            if st.button("🔄 5分後に自動再試行（推奨）", type="primary"):
-                                                st.info("⏰ 5分後に再試行します...")
-                                                time.sleep(5)  # デモ用に短縮（実際は300秒）
-                                                st.rerun()
-                                    else:
-                                        top_status_placeholder.error("❌ AI生成エラーが発生しました")
-                                        with st.expander("🔍 エラーの詳細と解決方法", expanded=True):
-                                            show_auth_error_guidance(error_message, "投稿生成")
-                                elif successful_posts > 0:
-                                    top_status_placeholder.success(f"✅ {successful_posts}件の投稿案を正常に生成・保存しました！")
-                                    st.balloons(); time.sleep(2); top_status_placeholder.empty(); st.rerun()
+                                        **💡 ヒント:**
+                                        - 一度に大量生成せず、数件ずつ分けて実行
+                                        - 他のユーザーと同じAPIを共有している可能性があります
+                                        
+                                        **🔗 詳細情報:**
+                                        [Google Cloud Vertex AI 制限について](https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429)
+                                        """)
+                                        
+                                        if st.button("🔄 5分後に自動再試行（推奨）", type="primary"):
+                                            st.info("⏰ 5分後に再試行します...")
+                                            time.sleep(5)  # デモ用に短縮（実際は300秒）
+                                            st.rerun()
                                 else:
-                                    top_status_placeholder.warning("⚠️ 投稿の生成に失敗しました。")
-                        else: 
-                            top_status_placeholder.error("AIモデルの読み込みに失敗しているため、投稿を生成できません。")
+                                    top_status_placeholder.error("❌ AI生成エラーが発生しました")
+                                    with st.expander("🔍 エラーの詳細と解決方法", expanded=True):
+                                        show_auth_error_guidance(error_message, "投稿生成")
+                            elif successful_posts > 0:
+                                top_status_placeholder.success(f"✅ {successful_posts}件の投稿案を正常に生成・保存しました！")
+                                st.balloons()
+                                time.sleep(2)
+                                top_status_placeholder.empty()
+                                st.rerun()
+                            else:
+                                top_status_placeholder.warning("⚠️ 投稿の生成に失敗しました。")
+                    else: 
+                        top_status_placeholder.error("AIモデルの読み込みに失敗しているため、投稿を生成できません。")
             
             with tab_custom:
                 st.subheader("✍️ 直接指示による投稿生成")
@@ -5210,20 +5176,10 @@ def main():
             if not casts:
                 st.info("編集できるキャストがまだいません。CSV管理タブからインポートしてください。")
             else:
-                # 選択状態の表示
-                if st.session_state.selected_cast_for_edit:
-                    selected_cast = execute_query(
-                        "SELECT name, nickname FROM casts WHERE id = ?",
-                        (st.session_state.selected_cast_for_edit,),
-                        fetch="one"
-                    )
-                    if selected_cast:
-                        display = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
-                        st.success(f"✅ 編集対象: {display}")
-                
                 # キャスト選択
                 cast_options = {f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']: c['id'] for c in casts}
                 
+                # デフォルトインデックス設定
                 default_index = 0
                 if st.session_state.selected_cast_for_edit:
                     for idx, (display, cid) in enumerate(cast_options.items()):
@@ -5239,8 +5195,21 @@ def main():
                 )
                 selected_cast_id = cast_options[selected_display]
                 
+                # 選択変更時にsession_state更新
                 if st.session_state.selected_cast_for_edit != selected_cast_id:
                     st.session_state.selected_cast_for_edit = selected_cast_id
+                    st.rerun()
+                
+                # 選択状態の表示（選択後に表示）
+                if st.session_state.selected_cast_for_edit:
+                    selected_cast = execute_query(
+                        "SELECT name, nickname FROM casts WHERE id = ?",
+                        (st.session_state.selected_cast_for_edit,),
+                        fetch="one"
+                    )
+                    if selected_cast:
+                        display = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
+                        st.success(f"✅ 編集対象: {display}")
                 
                 # キャスト情報取得
                 cast_data = execute_query("SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
@@ -6190,172 +6159,176 @@ def main():
                     except Exception as e:
                         st.error(f"エクスポートエラー: {e}")
 
+    elif page == "アドバイス管理":
+        st.title("💡 アドバイス管理")
+        st.markdown("投稿に対するフィードバックの選択肢（アドバイス）を管理します。")
+        
+        st.subheader("一括管理（CSV）")
+        with st.expander("CSVでのインポート/エクスポートはこちら", expanded=False):
+            c1, c2 = st.columns(2)
+            uploaded_file = c1.file_uploader("CSVファイル（1行目:ID、2行目:項目説明、3行目～:データ）", type="csv", key="adv_csv_up")
+            if uploaded_file:
+                try:
+                    # まず1行目（列名）を読み取る
+                    uploaded_file.seek(0)  # ファイルポインタをリセット
+                    header_df = pandas_lib.read_csv(uploaded_file, nrows=1, dtype=str)
+                    column_names = header_df.columns.tolist()
+                    
+                    # 3行目からデータを読み込み（skiprows=2で1行目と2行目をスキップ、1行目の列名を使用）
+                    uploaded_file.seek(0)  # ファイルポインタをリセット
+                    df = pandas_lib.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
+                    
+                    # content列の存在確認
+                    if 'content' not in df.columns:
+                        st.error("CSVに 'content' 列が見つかりません。アドバイス内容を含む列名を 'content' としてください。")
+                    else:
+                        success_count = 0
+                        duplicate_count = 0
+                        
+                        for _, row in df.iterrows():
+                            content = row['content'].strip()
+                            if content:  # 空でない場合のみ処理
+                                # 既存チェック
+                                existing = execute_query("SELECT id FROM advice_master WHERE content = ?", (content,), fetch="one")
+                                if existing:
+                                    duplicate_count += 1
+                                else:
+                                    if execute_query("INSERT INTO advice_master (content) VALUES (?)", (content,)) is not False:
+                                        success_count += 1
+                        
+                        # 結果メッセージの表示
+                        if success_count > 0:
+                            if duplicate_count > 0:
+                                st.success(f"{success_count}件の新しいアドバイスを追加しました。{duplicate_count}件は既に存在するため重複を回避しました。")
+                            else:
+                                st.success(f"{success_count}件のアドバイスを追加しました。")
+                        elif duplicate_count > 0:
+                            st.warning(f"{duplicate_count}件のアドバイスは既に存在するため、追加されませんでした。")
+                        else:
+                            st.info("有効なアドバイスデータが見つかりませんでした。")
+                            
+                except Exception as e:
+                    st.error(f"CSVの処理中にエラーが発生しました: {e}")
+                    
+            all_advs = execute_query("SELECT content FROM advice_master", fetch="all")
+            if all_advs:
+                df = pandas_lib.DataFrame([dict(r) for r in all_advs])
+                c2.download_button("CSVエクスポート", df.to_csv(index=False).encode('utf-8'), "advice.csv", "text/csv", use_container_width=True)
+        
+        st.markdown("---")
+        st.header("個別管理")
+        with st.form(key="new_advice_form", clear_on_submit=True):
+            new_content = st.text_input("アドバイス内容", placeholder="例：もっと可愛く")
+            if st.form_submit_button("追加する"):
+                if new_content:
+                    if execute_query("INSERT INTO advice_master (content) VALUES (?)", (new_content,)) is not False:
+                        st.success("新しいアドバイスを追加しました！")
+                else:
+                    st.warning("内容を入力してください。")
+        
+        st.header("登録済みアドバイス一覧")
+        all_advice = execute_query("SELECT id, content FROM advice_master ORDER BY id DESC", fetch="all")
+        if all_advice:
+            for adv in all_advice:
+                with st.expander(f"💡 {adv['content']}", expanded=False):
+                    with st.form(key=f"edit_advice_{adv['id']}"):
+                        # 編集フィールド
+                        new_content = st.text_input("アドバイス内容", value=adv['content'])
+                        
+                        # ボタン
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        update_btn = col_btn1.form_submit_button("更新", type="primary")
+                        delete_btn = col_btn2.form_submit_button("削除")
+                        cancel_btn = col_btn3.form_submit_button("キャンセル")
+                        
+                        if update_btn:
+                            if new_content:
+                                if execute_query("UPDATE advice_master SET content = ? WHERE id = ?", 
+                                               (new_content, adv['id'])) is not False:
+                                    st.success("アドバイスを更新しました！")
+                                    st.rerun()
+                            else:
+                                st.warning("アドバイス内容を入力してください。")
+                        
+                        if delete_btn:
+                            if execute_query("DELETE FROM advice_master WHERE id = ?", (adv['id'],)) is not False:
+                                st.success("アドバイスを削除しました。")
+                                st.rerun()
+        else:
+            st.info("登録済みのアドバイスはありません。")
 
     elif page == "指針アドバイス":
         st.title("📋 指針アドバイス管理")
-        st.markdown("すべての投稿生成時に参考にするグローバルアドバイスと、カテゴリ別の個別アドバイスを管理します。")
+        st.markdown("すべての投稿生成時に自動的に参考にされる指針です。キャストの性格や投稿の基本方針を設定してください。")
         
-        # タブ作成
-        global_tab, category_tab = st.tabs(["🌐 グローバル指針", "📂 カテゴリ別指針"])
+        # グローバルアドバイス一覧表示
+        global_advices = execute_query("SELECT * FROM global_advice ORDER BY sort_order, created_at", fetch="all")
         
-        with global_tab:
-            st.subheader("🌐 グローバル指針アドバイス")
-            st.markdown("すべての投稿生成時に自動的に参考にされる指針です。キャストの性格や投稿の基本方針を設定してください。")
-            
-            # グローバルアドバイス一覧表示
-            global_advices = execute_query("SELECT * FROM global_advice ORDER BY sort_order, created_at", fetch="all")
-            
-            # 新規追加フォーム
-            with st.expander("➕ 新しいグローバル指針を追加", expanded=not global_advices):
-                with st.form("add_global_advice"):
-                    col1, col2 = st.columns([3, 1])
-                    new_title = col1.text_input("指針タイトル", placeholder="例：投稿の基本方針")
-                    new_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=0)
-                    new_content = st.text_area(
-                        "指針内容", 
-                        placeholder="例：フォロワーの心に寄り添う内容を心がけ、共感を呼ぶ投稿を作成してください。",
-                        height=120
-                    )
-                    
-                    if st.form_submit_button("📝 グローバル指針を追加", type="primary"):
-                        if new_title and new_content:
-                            try:
-                                execute_query(
-                                    "INSERT INTO global_advice (title, content, sort_order) VALUES (?, ?, ?)",
-                                    (new_title, new_content, new_sort_order)
-                                )
-                                st.success("✅ グローバル指針を追加しました！")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ 追加中にエラーが発生しました: {e}")
-                        else:
-                            st.warning("タイトルと内容を入力してください。")
-            
-            # 既存のグローバルアドバイス表示・編集
-            if global_advices:
-                st.markdown("### 📝 登録済みグローバル指針")
-                for advice in global_advices:
-                    with st.expander(f"{'🟢' if advice['is_active'] else '🔴'} {advice['title']}", expanded=False):
-                        with st.form(f"edit_global_{advice['id']}"):
-                            col1, col2, col3 = st.columns([2, 1, 1])
-                            edit_title = col1.text_input("タイトル", value=advice['title'], key=f"title_g_{advice['id']}")
-                            edit_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=advice['sort_order'], key=f"sort_g_{advice['id']}")
-                            edit_active = col3.checkbox("有効", value=bool(advice['is_active']), key=f"active_g_{advice['id']}")
-                            
-                            edit_content = st.text_area(
-                                "指針内容", 
-                                value=advice['content'], 
-                                height=100,
-                                key=f"content_g_{advice['id']}"
-                            )
-                            
-                            col_a, col_b = st.columns(2)
-                            if col_a.form_submit_button("💾 更新", type="primary"):
-                                try:
-                                    execute_query(
-                                        "UPDATE global_advice SET title=?, content=?, is_active=?, sort_order=? WHERE id=?",
-                                        (edit_title, edit_content, int(edit_active), edit_sort_order, advice['id'])
-                                    )
-                                    st.success("✅ グローバル指針を更新しました！")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ 更新中にエラーが発生しました: {e}")
-                            
-                            if col_b.form_submit_button("🗑️ 削除", type="secondary"):
-                                try:
-                                    execute_query("DELETE FROM global_advice WHERE id=?", (advice['id'],))
-                                    st.success("✅ グローバル指針を削除しました！")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ 削除中にエラーが発生しました: {e}")
-            else:
-                st.info("📝 グローバル指針がまだ登録されていません。上記のフォームから追加してください。")
-        
-        with category_tab:
-            st.subheader("📂 カテゴリ別指針アドバイス")
-            st.markdown("特定のカテゴリの投稿生成時にのみ参考にされる指針です。カテゴリ固有の注意点や方針を設定してください。")
-            
-            # カテゴリ選択
-            categories = execute_query("SELECT * FROM situation_categories ORDER BY name", fetch="all")
-            if not categories:
-                st.warning("⚠️ カテゴリが登録されていません。「カテゴリ管理」で先にカテゴリを作成してください。")
-            else:
-                category_options = {cat['name']: cat['id'] for cat in categories}
-                selected_category_name = st.selectbox("カテゴリを選択", list(category_options.keys()))
-                selected_category_id = category_options[selected_category_name]
-                
-                # 選択されたカテゴリのアドバイス一覧
-                category_advices = execute_query(
-                    "SELECT * FROM category_advice WHERE category_id=? ORDER BY sort_order, created_at",
-                    (selected_category_id,),
-                    fetch="all"
+        # 新規追加フォーム
+        with st.expander("➕ 新しいグローバル指針を追加", expanded=not global_advices):
+            with st.form("add_global_advice"):
+                col1, col2 = st.columns([3, 1])
+                new_title = col1.text_input("指針タイトル", placeholder="例：投稿の基本方針")
+                new_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=0)
+                new_content = st.text_area(
+                    "指針内容", 
+                    placeholder="例：フォロワーの心に寄り添う内容を心がけ、共感を呼ぶ投稿を作成してください。",
+                    height=120
                 )
                 
-                # 新規追加フォーム
-                with st.expander(f"➕ 「{selected_category_name}」カテゴリの指針を追加", expanded=not category_advices):
-                    with st.form(f"add_category_advice_{selected_category_id}"):
-                        col1, col2 = st.columns([3, 1])
-                        new_title = col1.text_input("指針タイトル", placeholder="例：恋愛投稿の注意点")
-                        new_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=0)
-                        new_content = st.text_area(
-                            "指針内容",
-                            placeholder=f"例：{selected_category_name}カテゴリ特有の投稿方針や注意点を記述してください。",
-                            height=120
+                if st.form_submit_button("📝 グローバル指針を追加", type="primary"):
+                    if new_title and new_content:
+                        try:
+                            execute_query(
+                                "INSERT INTO global_advice (title, content, sort_order) VALUES (?, ?, ?)",
+                                (new_title, new_content, new_sort_order)
+                            )
+                            st.success("✅ グローバル指針を追加しました！")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ 追加中にエラーが発生しました: {e}")
+                    else:
+                        st.warning("タイトルと内容を入力してください。")
+        
+        # 既存のグローバルアドバイス表示・編集
+        if global_advices:
+            st.markdown("### 📝 登録済みグローバル指針")
+            for advice in global_advices:
+                with st.expander(f"{'🟢' if advice['is_active'] else '🔴'} {advice['title']}", expanded=False):
+                    with st.form(f"edit_global_{advice['id']}"):
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        edit_title = col1.text_input("タイトル", value=advice['title'], key=f"title_g_{advice['id']}")
+                        edit_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=advice['sort_order'], key=f"sort_g_{advice['id']}")
+                        edit_active = col3.checkbox("有効", value=bool(advice['is_active']), key=f"active_g_{advice['id']}")
+                        
+                        edit_content = st.text_area(
+                            "指針内容", 
+                            value=advice['content'], 
+                            height=100,
+                            key=f"content_g_{advice['id']}"
                         )
                         
-                        if st.form_submit_button("📝 カテゴリ指針を追加", type="primary"):
-                            if new_title and new_content:
-                                try:
-                                    execute_query(
-                                        "INSERT INTO category_advice (category_id, title, content, sort_order) VALUES (?, ?, ?, ?)",
-                                        (selected_category_id, new_title, new_content, new_sort_order)
-                                    )
-                                    st.success(f"✅ 「{selected_category_name}」カテゴリの指針を追加しました！")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ 追加中にエラーが発生しました: {e}")
-                            else:
-                                st.warning("タイトルと内容を入力してください。")
-                
-                # 既存のカテゴリアドバイス表示・編集
-                if category_advices:
-                    st.markdown(f"### 📝 「{selected_category_name}」カテゴリの指針")
-                    for advice in category_advices:
-                        with st.expander(f"{'🟢' if advice['is_active'] else '🔴'} {advice['title']}", expanded=False):
-                            with st.form(f"edit_category_{advice['id']}"):
-                                col1, col2, col3 = st.columns([2, 1, 1])
-                                edit_title = col1.text_input("タイトル", value=advice['title'], key=f"title_c_{advice['id']}")
-                                edit_sort_order = col2.number_input("表示順", min_value=0, max_value=100, value=advice['sort_order'], key=f"sort_c_{advice['id']}")
-                                edit_active = col3.checkbox("有効", value=bool(advice['is_active']), key=f"active_c_{advice['id']}")
-                                
-                                edit_content = st.text_area(
-                                    "指針内容",
-                                    value=advice['content'],
-                                    height=100,
-                                    key=f"content_c_{advice['id']}"
+                        col_a, col_b = st.columns(2)
+                        if col_a.form_submit_button("💾 更新", type="primary"):
+                            try:
+                                execute_query(
+                                    "UPDATE global_advice SET title=?, content=?, is_active=?, sort_order=? WHERE id=?",
+                                    (edit_title, edit_content, int(edit_active), edit_sort_order, advice['id'])
                                 )
-                                
-                                col_a, col_b = st.columns(2)
-                                if col_a.form_submit_button("💾 更新", type="primary"):
-                                    try:
-                                        execute_query(
-                                            "UPDATE category_advice SET title=?, content=?, is_active=?, sort_order=? WHERE id=?",
-                                            (edit_title, edit_content, int(edit_active), edit_sort_order, advice['id'])
-                                        )
-                                        st.success("✅ カテゴリ指針を更新しました！")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"❌ 更新中にエラーが発生しました: {e}")
-                                
-                                if col_b.form_submit_button("🗑️ 削除", type="secondary"):
-                                    try:
-                                        execute_query("DELETE FROM category_advice WHERE id=?", (advice['id'],))
-                                        st.success("✅ カテゴリ指針を削除しました！")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"❌ 削除中にエラーが発生しました: {e}")
-                else:
-                    st.info(f"📝 「{selected_category_name}」カテゴリの指針がまだ登録されていません。上記のフォームから追加してください。")
+                                st.success("✅ グローバル指針を更新しました！")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 更新中にエラーが発生しました: {e}")
+                        
+                        if col_b.form_submit_button("🗑️ 削除", type="secondary"):
+                            try:
+                                execute_query("DELETE FROM global_advice WHERE id=?", (advice['id'],))
+                                st.success("✅ グローバル指針を削除しました！")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 削除中にエラーが発生しました: {e}")
+        else:
+            st.info("📝 グローバル指針がまだ登録されていません。上記のフォームから追加してください。")
 
     elif page == "システム設定":
         st.title("⚙️ システム設定")
