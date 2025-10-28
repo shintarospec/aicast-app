@@ -3708,65 +3708,18 @@ def main():
                     st.info("チューニング対象の投稿案はありません。")
 
             with tab2:
-                # Google Sheets連携の設定状況を表示
-                credentials_path = "credentials/credentials.json"
-                token_path = "credentials/token.pickle"
-                
-                if os.path.exists(token_path):
-                    st.success("✅ Google Sheets連携設定済み（OAuth認証完了）", icon="🔗")
-                elif os.path.exists(credentials_path):
-                    st.info("📋 OAuth認証ファイル設定済み（初回送信時にブラウザ認証が開始されます）", icon="🔐")
-                else:
-                    with st.expander("⚠️ Google Sheets連携未設定（OAuth設定方法を表示）", expanded=False):
-                        st.warning("""Google Sheets送信機能を使用するにはOAuth認証設定が必要です。
-
-【OAuth認証設定手順】
-1. [Google Cloud Console](https://console.cloud.google.com) にアクセス
-2. 新しいプロジェクトを作成または既存プロジェクト選択
-3. 「APIとサービス」> 「ライブラリ」で以下を有効化：
-   - **Google Sheets API**
-   - **Google Drive API**
-4. 「APIとサービス」> 「認証情報」> 「認証情報を作成」> **「OAuthクライアントID」**
-5. 同意画面の設定（初回のみ）：
-   - ユーザータイプ：**外部**
-   - アプリ名、メールアドレスを入力
-6. OAuthクライアントID作成：
-   - アプリケーションの種類：**「デスクトップアプリケーション」**
-   - 名前：任意（例：AIcast Room）
-7. **ダウンロードボタン**をクリックしてJSONファイルを取得
-8. ダウンロードしたファイルを **`credentials/credentials.json`** として保存
-9. アプリを再起動して送信ボタンをクリック（ブラウザで認証画面が開きます）
-
-**注意**: 初回送信時にブラウザでGoogle認証が必要です。認証後はトークンが自動保存されます。""")
-                
                 approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
                 if approved_posts:
                     st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
                     
                     # 一括予約パネル
-                    with st.expander("� 一括予約", expanded=False):
-                        st.subheader("� 選択した投稿を一括予約")
+                    with st.expander("📅 一括予約", expanded=False):
+                        st.subheader("📅 選択した投稿を一括予約")
                         
-                        # 送信先選択
-                        bulk_destination_options = [
-                            ("📊 Google Sheets", "google_sheets"),
-                            ("🐦 X (Twitter)", "x_api"),
-                            ("📊🐦 両方に送信", "both")
-                        ]
-                        
-                        bulk_destination = st.selectbox(
-                            "一括予約先",
-                            options=[opt[0] for opt in bulk_destination_options],
-                            index=1,  # デフォルトで"🐦 X (Twitter)"を選択
-                            key="bulk_destination"
-                        )
-                        
-                        bulk_destination_value = next((opt[1] for opt in bulk_destination_options if opt[0] == bulk_destination), "x_api")
-                        
-                        st.info(f"選択した投稿を設定された時刻で{bulk_destination}に一括予約します。")
+                        st.info(f"選択した投稿を設定された時刻でX (Twitter)に一括予約します。")
                         
                         # 一括予約実行
-                        if st.button("� 選択した投稿を一括予約", type="primary", use_container_width=True):
+                        if st.button("📅 選択した投稿を一括予約", type="primary", use_container_width=True):
                             selected_posts = [post_id for post_id, selected in st.session_state.items() 
                                             if post_id.startswith('select_approved_') and selected]
                             
@@ -3844,7 +3797,7 @@ def main():
                                         # 予約履歴を記録
                                         scheduled_at_log = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
                                         execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
-                                                    (post_id, bulk_destination_value, scheduled_at_log, scheduled_at_str, 'scheduled'))
+                                                    (post_id, "x_api", scheduled_at_log, scheduled_at_str, 'scheduled'))
                                         
                                         scheduled_count += 1
                                         progress_bar.progress((i + 1) / total_posts)
@@ -3959,90 +3912,6 @@ def main():
                             st.info("💡 ヒント\n・画像は自動リサイズされます\n・X APIのFREEプランで利用可能\n・最大4枚まで同時投稿可能")
                     
                     # Google Sheets画像URL送信セクション
-                    with st.expander("📊 Google Drive → Google Sheets送信", expanded=False):
-                        st.subheader("� Google Drive画像付きGoogle Sheets送信")
-                        st.info("Google Drive画像URLを指定してGoogle Sheetsに送信し、GASで自動画像投稿できます。")
-                        
-                        # 使用方法の説明
-                        with st.expander("📋 Google Drive URL取得方法", expanded=False):
-                            st.markdown("""
-                            **🔗 Google Drive画像の共有URL取得手順:**
-                            1. Google Driveで画像ファイルを右クリック
-                            2. 「共有」を選択
-                            3. 「リンクを知っている全員」に変更
-                            4. 「リンクをコピー」をクリック
-                            5. 下記にペーストしてください
-                            
-                            **📝 対応するURL形式:**
-                            - `https://drive.google.com/file/d/FILE_ID/view?usp=sharing`
-                            - `https://drive.google.com/open?id=FILE_ID`
-                            - 自動的に直接アクセス可能な形式に変換されます
-                            """)
-                        
-                        # 投稿テキスト入力
-                        sheets_post_text = st.text_area(
-                            "投稿テキスト",
-                            placeholder="Google Sheets送信用のテキストを入力してください...",
-                            max_chars=280,
-                            help="GASで自動投稿されるテキスト"
-                        )
-                        
-                        # Google Drive画像URL入力（最大4つ）
-                        st.write("� Google Drive画像URL（最大4つ）")
-                        image_urls = []
-                        for i in range(4):
-                            url = st.text_input(
-                                f"Google Drive画像URL {i+1}",
-                                placeholder=f"https://drive.google.com/file/d/FILE_ID/view?usp=sharing",
-                                key=f"sheets_drive_url_{i}",
-                                help="Google Drive共有URL（自動変換されます）"
-                            )
-                            if url.strip():
-                                image_urls.append(url.strip())
-                        
-                        if image_urls:
-                            st.write(f"🔗 設定済みGoogle Drive画像: {len(image_urls)}個")
-                            for i, url in enumerate(image_urls):
-                                converted_url = convert_google_drive_url(url)
-                                st.caption(f"{i+1}. 元URL: {url[:40]}{'...' if len(url) > 40 else ''}")
-                                if converted_url != url:
-                                    st.caption(f"   → 変換後: {converted_url[:40]}{'...' if len(converted_url) > 40 else ''}")
-                        
-                        # 送信ボタン
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("� Google Drive画像付きでSheets送信", type="primary", use_container_width=True):
-                                if not sheets_post_text.strip():
-                                    st.error("⚠️ 投稿テキストを入力してください")
-                                else:
-                                    with st.spinner("Google Sheetsに送信中..."):
-                                        try:
-                                            # Google Sheets送信実行
-                                            current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
-                                            cast_id = current_cast['id'] if current_cast else None
-                                            
-                                            success, message = send_to_google_sheets(
-                                                cast_name=selected_cast_name,
-                                                post_content=sheets_post_text,
-                                                scheduled_datetime=datetime.datetime.now(),
-                                                cast_id=cast_id,
-                                                action_type='post',
-                                                image_urls=image_urls if image_urls else None
-                                            )
-                                            
-                                            if success:
-                                                st.success(f"✅ {message}")
-                                                if image_urls:
-                                                    st.info(f"� Google Drive画像 {len(image_urls)}個も送信されました。GASで自動的に画像付き投稿されます。")
-                                                st.rerun()
-                                            else:
-                                                st.error(f"❌ {message}")
-                                                
-                                        except Exception as e:
-                                            st.error(f"❌ Google Sheets送信エラー: {str(e)}")
-                        
-                        with col2:
-                            st.info("💡 Google Drive連携\n・Drive URLを自動変換\n・GASで画像付き投稿実行\n・チーム共有も簡単")
                     
                     st.markdown("---")
                     
@@ -5536,22 +5405,23 @@ def main():
                                 x_sample_id_val = st.session_state.get(f'parsed_x_sample_id_{i}_{selected_cast_id}', x_sample_id_val)
                                 x_sample_name_val = st.session_state.get(f'parsed_x_sample_name_{i}_{selected_cast_id}', x_sample_name_val)
                                 
-                                # parsed_の値をedit_キーに事前コピー（UIに反映させるため）
-                                # ⚠️ 重要: 条件なしで常に上書き（parsed_が更新された時に反映させる）
+                                # parsed_の値をedit_キーに初期化（edit_キーが存在しない場合のみ）
                                 edit_key_id = f"edit_x_sample_id_{i}_{selected_cast_id}"
                                 edit_key_name = f"edit_x_sample_name_{i}_{selected_cast_id}"
                                 
-                                if x_sample_id_val:
+                                # 🔧 修正: edit_キーが既に存在する場合は上書きしない（ユーザーの編集を保持）
+                                if edit_key_id not in st.session_state and x_sample_id_val:
                                     st.session_state[edit_key_id] = x_sample_id_val
-                                if x_sample_name_val:
+                                if edit_key_name not in st.session_state and x_sample_name_val:
                                     st.session_state[edit_key_name] = x_sample_name_val
                                 
                                 # ⚠️ valueパラメータを削除（セッションステートで値を設定しているため、警告が出る）
-                                edit_x_sample_id = col_x1.text_input(f"XサンプルID #{i}", key=edit_key_id, help="アカウントIDから自動選択されます")
-                                edit_x_sample_name = col_x2.text_input(f"Xサンプルニックネーム #{i}", key=edit_key_name, help="ニックネームから自動選択されます")
+                                col_x1.text_input(f"XサンプルID #{i}", key=edit_key_id, help="アカウントIDから自動選択されます")
+                                col_x2.text_input(f"Xサンプルニックネーム #{i}", key=edit_key_name, help="ニックネームから自動選択されます")
                                 
-                                edit_x_samples_id.append(edit_x_sample_id)
-                                edit_x_samples_name.append(edit_x_sample_name)
+                                # セッションステートから実際の値を取得して配列に追加
+                                edit_x_samples_id.append(st.session_state.get(edit_key_id, ""))
+                                edit_x_samples_name.append(st.session_state.get(edit_key_name, ""))
 
                     
                     with mission_edit_tab:
@@ -5607,7 +5477,6 @@ def main():
                                             
                                             if csv_lines:
                                                 # ランダムに3つを選択（重複なし）
-                                                import random
                                                 import csv
                                                 from io import StringIO
                                                 
@@ -5625,7 +5494,7 @@ def main():
                                                     parts = next(reader)
                                                     
                                                     if len(parts) >= 2:
-                                                        sample_id = parts[0].strip()
+                                                        sample_id = parts[0].strip().replace('\\_', '_')  # バックスラッシュ削除
                                                         sample_name = parts[1].strip()
                                                         st.session_state[f'parsed_x_sample_id_{idx}_{selected_cast_id}'] = sample_id
                                                         st.session_state[f'parsed_x_sample_name_{idx}_{selected_cast_id}'] = sample_name
@@ -5716,6 +5585,15 @@ def main():
                                             for result in extraction_results:
                                                 st.write(result)
                                             st.info("💡 下のフォームで内容を確認し、サンプル投稿は「📥 一括インポート」ボタンでDBに登録してください")
+                                            
+                                            # 🔧 Xサンプルのedit_キーをクリア（新しいparsed_値を反映させるため）
+                                            for i in range(1, 4):
+                                                edit_key_id = f"edit_x_sample_id_{i}_{selected_cast_id}"
+                                                edit_key_name = f"edit_x_sample_name_{i}_{selected_cast_id}"
+                                                if edit_key_id in st.session_state:
+                                                    del st.session_state[edit_key_id]
+                                                if edit_key_name in st.session_state:
+                                                    del st.session_state[edit_key_name]
                                         else:
                                             st.warning("⚠️ 抽出できる情報が見つかりませんでした。テキストの形式を確認してください。")
                                         

@@ -55,6 +55,18 @@
             }
         },
         {
+            "label": "🔄 ローカル: Streamlit安全再起動",
+            "type": "shell",
+            "command": "/workspaces/aicast-app/restart-streamlit.sh",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            }
+        },
+        {
             "label": "🌐 VPS: コードプル & 再起動",
             "type": "shell",
             "command": "ssh ubuntu@153.126.194.114 'cd /home/ubuntu/aicast-app && git pull origin clean-production && screen -S aicast -X quit; sleep 2 && screen -dmS aicast bash -c \"source .venv/bin/activate && python3 run.py\"'",
