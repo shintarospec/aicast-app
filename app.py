@@ -21,6 +21,7 @@ try:
 except ImportError:
     secretmanager = None
 import pickle
+from streamlit_option_menu import option_menu
 
 # 🔐 認証システムのインポート
 from auth_system import check_password, show_auth_status, save_current_page, get_current_page
@@ -29,8 +30,8 @@ from auth_system import check_password, show_auth_status, save_current_page, get
 if not check_password():
     st.stop()
 
-# 🔐 認証状態表示
-show_auth_status()
+# 🔐 認証状態表示は後でサイドバー下部に表示
+# show_auth_status()
 
 from config import Config
 
@@ -162,8 +163,8 @@ def initialize_database_for_production():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
-# Initialize production environment
-setup_production_environment()
+# Initialize production environment（サイドバー下部で表示）
+# setup_production_environment()
 
 class CloudFunctionsPoster:
     """Cloud Functions経由のX投稿クライアント"""
@@ -2548,7 +2549,7 @@ def main():
             else:
                 # Local development or default authentication (変更なし！)
                 vertexai.init(project=project_id, location=location)
-                st.sidebar.success("✅ Googleサービス認証完了")
+                # 認証完了メッセージは下部で表示
             st.session_state.auth_done = True
     except Exception as e:
         st.sidebar.error(f"🚨 Google Cloud認証エラー")
@@ -2603,7 +2604,7 @@ def main():
             
             try:
                 st.session_state.gemini_model = GenerativeModel(selected_model)
-                st.sidebar.success(f"🤖 AIモデル: {selected_model} ({api_version})")
+                # AIモデル情報は下部で表示
                 model_initialized = True
             except Exception as model_error:
                 st.sidebar.error(f"❌ モデル読み込み失敗: {selected_model}")
@@ -2636,6 +2637,104 @@ def main():
             st.session_state.gemini_model = None
 
     st.sidebar.title("AIcast room")
+    
+    # メニューの選択肢（タイトルと統一した絵文字）
+    menu_options = ["📝 投稿管理", "🎨 AI画像投稿", "👤 キャスト管理", "💡 アドバイス管理", "📋 指針アドバイス", "⚙️ システム設定"]
+    menu_icons = []  # 絵文字を使うのでアイコン不要
+    
+    # 保存されたページを取得（リロード後の復帰用）
+    saved_page = get_current_page()
+    
+    # リダイレクト機能
+    if st.session_state.get('redirect_to_settings'):
+        page = "⚙️ システム設定"
+        default_index = menu_options.index("⚙️ システム設定")
+        st.session_state.redirect_to_settings = False  # リセット
+        save_current_page("⚙️ システム設定")  # ページ状態を保存
+    elif saved_page and saved_page in menu_options:
+        # 保存されたページがある場合はそれを使用
+        default_index = menu_options.index(saved_page)
+        page = saved_page
+    else:
+        default_index = 0  # デフォルトは投稿管理
+        page = "📝 投稿管理"
+        save_current_page("📝 投稿管理")
+        
+    # サイドバーメニュー（option_menuスタイル）
+    with st.sidebar:
+        selected_page = option_menu(
+            menu_title="メニュー",
+            options=menu_options,
+            icons=[],  # 絵文字を使用
+            menu_icon="list-columns-reverse",
+            default_index=default_index,
+            key="main_navigation",
+            styles={
+                "container": {"padding": "5px", "background-color": "#000000"},
+                "nav-link": {
+                    "font-size": "14px",
+                    "text-align": "left",
+                    "margin": "0px",
+                    "--hover-color": "#2F4F4F",
+                    "color": "#00CED1"
+                },
+                "nav-link-selected": {"background-color": "#00CED1", "color": "#000000"},
+            }
+        )
+    
+    # ==================== グローバルキャスト選択（サイドバー下部） ====================
+    st.sidebar.subheader("🎭 アカウント選択")
+    
+    # キャスト一覧取得
+    all_casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
+    
+    if all_casts:
+        cast_options = {f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']: c['id'] for c in all_casts}
+        
+        # セッションステート初期化
+        if 'global_selected_cast_id' not in st.session_state:
+            st.session_state.global_selected_cast_id = all_casts[0]['id']  # デフォルトは最初のキャスト
+        
+        # デフォルトインデックス設定
+        default_cast_index = 0
+        for idx, (display, cid) in enumerate(cast_options.items()):
+            if cid == st.session_state.global_selected_cast_id:
+                default_cast_index = idx
+                break
+        
+        selected_cast_display = st.sidebar.selectbox(
+            "運営中のアカウント",
+            list(cast_options.keys()),
+            index=default_cast_index,
+            key="global_cast_selector",
+            help="このアカウントで投稿管理・キャスト管理を行います"
+        )
+        
+        selected_cast_id = cast_options[selected_cast_display]
+        
+        # 選択変更時に更新
+        if st.session_state.global_selected_cast_id != selected_cast_id:
+            st.session_state.global_selected_cast_id = selected_cast_id
+            # キャスト管理の選択もリセット
+            if 'selected_cast_for_edit' in st.session_state:
+                st.session_state.selected_cast_for_edit = selected_cast_id
+            st.rerun()
+        
+        # 選択中のキャスト情報を表示
+        cast_info = execute_query(
+            "SELECT name, nickname, age FROM casts WHERE id = ?",
+            (st.session_state.global_selected_cast_id,),
+            fetch="one"
+        )
+        if cast_info:
+            display_name = f"{cast_info['name']}（{cast_info['nickname']}）" if cast_info['nickname'] else cast_info['name']
+            st.sidebar.success(f"✅ {display_name}")
+            st.sidebar.caption(f"年齢: {cast_info['age']}歳")
+    else:
+        st.sidebar.warning("⚠️ キャストが登録されていません")
+        st.session_state.global_selected_cast_id = None
+    
+    # ==================== サイドバー下部: AIモデル設定 ====================
     
     # AIモデル設定（シンプル入力方式）
     with st.sidebar.expander("🤖 AIモデル設定", expanded=False):
@@ -2692,147 +2791,42 @@ def main():
                     del st.session_state.gemini_model
                 st.rerun()
     
-    # メニューの選択肢
-    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "キャスト管理", "アドバイス管理", "指針アドバイス", "システム設定"]
+    # ==================== サイドバー下部: システム情報 ====================
+    st.sidebar.markdown("### 📊 システム情報")
     
-    # 保存されたページを取得（リロード後の復帰用）
-    saved_page = get_current_page()
+    # Googleサービス認証状態を表示
+    if st.session_state.get('auth_done'):
+        st.sidebar.success("✅ Googleサービス認証完了")
     
-    # リダイレクト機能
-    if st.session_state.get('redirect_to_settings'):
-        page = "システム設定"
-        default_index = menu_options.index("システム設定")
-        st.session_state.redirect_to_settings = False  # リセット
-        save_current_page("システム設定")  # ページ状態を保存
-    elif st.session_state.get('dashboard_redirect'):
-        page = st.session_state.dashboard_redirect
-        default_index = menu_options.index(page) if page in menu_options else 1  # 投稿管理のインデックス
-        save_current_page(page)  # ページ状態を保存
-        # リダイレクト情報は後で削除する
-    elif saved_page and saved_page in menu_options:
-        # 保存されたページがある場合はそれを使用
-        default_index = menu_options.index(saved_page)
-        page = saved_page
-    else:
-        default_index = 0  # デフォルトはダッシュボード
-        page = "📊 ダッシュボード"
-        save_current_page("📊 ダッシュボード")
-        
-    # サイドバーメニューを常に表示
-    selected_page = st.sidebar.radio("メニュー", menu_options, index=default_index, key="main_navigation")
+    # プロダクション環境の追加情報
+    if Config.is_production_environment():
+        # MCF Production validation
+        mcf_errors = Config.validate_mcf_settings()
+        if mcf_errors:
+            st.sidebar.error("🚨 MCF Production Alert:")
+            for error in mcf_errors:
+                st.sidebar.error(f"   • {error}")
+    
+    # AIモデル情報を表示
+    if st.session_state.get('gemini_model'):
+        selected_model = st.session_state.get('selected_model_name', 'gemini-2.5-flash')
+        try:
+            from vertexai.generative_models import GenerativeModel
+            api_version = "stable"
+        except ImportError:
+            api_version = "preview"
+        st.sidebar.success(f"🤖 AIモデル: {selected_model} ({api_version})")
+    
+    # 認証状態表示（セッション情報）
+    show_auth_status()
     
     # ページ変更時の処理
     if selected_page != page:
         page = selected_page
         save_current_page(page)  # 新しいページ状態を保存
         st.rerun()  # ページ変更を反映
-    if page == "📊 ダッシュボード":
-        st.title("📊 AIcast Room ダッシュボード")
-        
-        # 全体統計の取得
-        total_casts = execute_query("SELECT COUNT(*) as count FROM casts", fetch="one")['count']
-        total_posts = execute_query("SELECT COUNT(*) as count FROM posts", fetch="one")['count']
-        
-        # 全体サマリー（コンパクト版）
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("📝 キャスト", total_casts)
-        with col2:
-            st.metric("📰 総投稿", total_posts)
-        with col3:
-            today_posts = execute_query("SELECT COUNT(*) as count FROM posts WHERE DATE(generated_at) = DATE('now')", fetch="all")
-            today_count = today_posts[0]['count'] if today_posts else 0
-            st.metric("🗓️ 今日", today_count)
-        with col4:
-            sent_posts = execute_query("SELECT COUNT(*) as count FROM posts WHERE sent_status = 'sent'", fetch="one")['count']
-            st.metric("📤 送信済", sent_posts)
-        
-        st.markdown("")  # 軽い間隔
-        
-        # キャスト別統計の取得
-        casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
-        
-        if not casts:
-            st.warning("キャスト未登録です。「キャスト管理」で作成してください。")
-            st.stop()
-        
-        st.subheader("🎭 キャスト別投稿状況")
-        
-        # キャスト別統計データを取得
-        cast_stats = []
-        for cast in casts:
-            cast_id = cast['id']
-            cast_name = cast['name']
-            cast_nickname = cast['nickname']
-            
-            # 各ステータスの投稿数を取得（却下済みは除外）
-            drafts = execute_query("SELECT COUNT(*) as count FROM posts WHERE cast_id = ? AND status = 'draft'", (cast_id,), fetch="one")['count']
-            approved = execute_query("SELECT COUNT(*) as count FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status = 'scheduled' OR sent_status IS NULL)", (cast_id,), fetch="one")['count']
-            sent = execute_query("SELECT COUNT(*) as count FROM posts WHERE cast_id = ? AND sent_status = 'sent'", (cast_id,), fetch="one")['count']
-            rejected = execute_query("SELECT COUNT(*) as count FROM posts WHERE cast_id = ? AND status = 'rejected'", (cast_id,), fetch="one")['count']
-            
-            cast_stats.append({
-                'id': cast_id,
-                'name': cast_name,
-                'nickname': cast_nickname,
-                'drafts': drafts,
-                'approved': approved,
-                'sent': sent,
-                'total': drafts + approved + sent + rejected  # 却下も総数には含める
-            })
-        
-        # キャスト一覧を1行形式で表示（コンパクト版）
-        for i, cast in enumerate(cast_stats):
-            display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
-            
-            # 1行レイアウト: キャスト名、統計、ボタン
-            col_name, col_stats, col_action = st.columns([3, 4, 2])
-            
-            with col_name:
-                st.markdown(f"**🎭 {display_name}**")
-            
-            with col_stats:
-                # 統計を横並びで表示（却下済みを除外、総投稿数を追加）
-                stat_text = []
-                if cast['drafts'] > 0:
-                    stat_text.append(f"📝 **{cast['drafts']}**")
-                else:
-                    stat_text.append(f"📝 {cast['drafts']}")
-                
-                if cast['approved'] > 0:
-                    stat_text.append(f"✅ **{cast['approved']}**")
-                else:
-                    stat_text.append(f"✅ {cast['approved']}")
-                
-                if cast['sent'] > 0:
-                    stat_text.append(f"📤 **{cast['sent']}**")
-                else:
-                    stat_text.append(f"📤 {cast['sent']}")
-                
-                # 総投稿数を右端に追加
-                stat_text.append(f"📊 {cast['total']}件")
-                
-                st.markdown(" | ".join(stat_text))
-            
-            with col_action:
-                if st.button(f"➕ 管理", key=f"manage_{cast['id']}", type="primary", use_container_width=True):
-                    st.session_state.selected_cast_name = cast['name']
-                    st.session_state.dashboard_redirect = "投稿管理"
-                    st.rerun()
-            
-            # 最後の要素以外に薄い区切り線を追加
-            if i < len(cast_stats) - 1:
-                st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
-        
-        # 最近の活動セクションは一時的に非表示
-        # st.subheader("📈 最近の活動")
-        # ...
     
-    elif page == "投稿管理":
-        # ダッシュボードからのリダイレクト処理
-        if st.session_state.get('dashboard_redirect'):
-            del st.session_state.dashboard_redirect
-        
+    if page == "📝 投稿管理":
         casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
         if not casts:
             st.warning("キャスト未登録です。「キャスト管理」で作成してください。"); st.stop()
@@ -2840,6 +2834,18 @@ def main():
         # --- 編集ページか一覧ページかを判定 ---
         if st.session_state.get('editing_post_id') is not None:
             # --- 投稿チューニング（詳細編集）ページ ---
+            # 選択中のキャスト情報を先に取得して表示
+            post_id = st.session_state.editing_post_id
+            post = execute_query("SELECT p.*, c.name as cast_name FROM posts p JOIN casts c ON p.cast_id = c.id WHERE p.id = ?", (post_id,), fetch="one")
+            if post:
+                selected_cast_id = post['cast_id']
+                selected_cast_details_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
+                selected_cast_details = dict(selected_cast_details_row) if selected_cast_details_row else None
+                
+                if selected_cast_details:
+                    display_name = f"{selected_cast_details['name']}（{selected_cast_details['nickname']}）" if selected_cast_details['nickname'] else selected_cast_details['name']
+                    st.success(f"🎭 運営中: **{display_name}** | サイドバーで変更できます")
+            
             st.title("📝 投稿チューニング")
             edit_status_placeholder = st.empty()
             # ...existing code...
@@ -3075,10 +3081,35 @@ def main():
                 else: st.write("この投稿にはまだチューニング履歴がありません。")
         else:
             # --- 投稿管理（一覧）ページ ---
+            # グローバル選択されたキャストを使用
+            if st.session_state.get('global_selected_cast_id'):
+                selected_cast_id = st.session_state.global_selected_cast_id
+                selected_cast = execute_query("SELECT name, nickname FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
+                if selected_cast:
+                    selected_cast_name = selected_cast['name']
+                    st.session_state.selected_cast_name = selected_cast_name
+                else:
+                    # グローバル選択が無効な場合はデフォルト
+                    st.session_state.selected_cast_name = casts[0]['name']
+                    selected_cast_id = casts[0]['id']
+                    selected_cast_name = casts[0]['name']
+            else:
+                # グローバル選択がない場合はデフォルト
+                if 'selected_cast_name' not in st.session_state or st.session_state.selected_cast_name not in [c['name'] for c in casts]:
+                    st.session_state.selected_cast_name = casts[0]['name']
+                selected_cast_name = st.session_state.selected_cast_name
+                selected_cast_id = next((c['id'] for c in casts if c['name'] == selected_cast_name), None)
+            
+            # 選択中のキャスト情報を表示（タイトルの上）
+            selected_cast_details_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
+            selected_cast_details = dict(selected_cast_details_row) if selected_cast_details_row else None
+            
+            if selected_cast_details:
+                display_name = f"{selected_cast_details['name']}（{selected_cast_details['nickname']}）" if selected_cast_details['nickname'] else selected_cast_details['name']
+                st.success(f"🎭 運営中: **{display_name}** | サイドバーで変更できます")
+            
             st.title("📝 投稿管理")
-            # selected_cast_name の初期化
-            if 'selected_cast_name' not in st.session_state or st.session_state.selected_cast_name not in [c['name'] for c in casts]:
-                st.session_state.selected_cast_name = casts[0]['name']
+            
             top_status_placeholder = st.empty()
             if "page_status_message" in st.session_state:
                 msg_type, msg_content = st.session_state.page_status_message
@@ -3088,34 +3119,22 @@ def main():
                 del st.session_state.page_status_message
                 time.sleep(2); top_status_placeholder.empty()
 
-            def update_selected_cast():
-                # 表示名から実際のキャスト名に変換
-                display_name = st.session_state.cast_selector
-                st.session_state.selected_cast_name = cast_name_mapping[display_name]
-            
-            # キャスト表示名を「name（nickname）」形式で作成
-            cast_display_options = []
-            cast_name_mapping = {}
-            for c in casts:
-                display_name = f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']
-                cast_display_options.append(display_name)
-                cast_name_mapping[display_name] = c['name']
-            
-            # 現在選択されているキャストの表示名を取得
-            current_cast = next((c for c in casts if c['name'] == st.session_state.selected_cast_name), None)
-            current_display = f"{current_cast['name']}（{current_cast['nickname']}）" if current_cast and current_cast['nickname'] else st.session_state.selected_cast_name
-            current_index = cast_display_options.index(current_display) if current_display in cast_display_options else 0
-            
-            selected_display_name = st.selectbox("キャストを選択", cast_display_options, key='cast_selector', index=current_index, on_change=update_selected_cast)
-            selected_cast_name = cast_name_mapping[selected_display_name]
-            selected_cast_id = next((c['id'] for c in casts if c['name'] == selected_cast_name), None)
-            selected_cast_details_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
-            selected_cast_details = dict(selected_cast_details_row) if selected_cast_details_row else None
+            # メインタブメニュー（投稿案生成を先頭に統合）
+            tab_generate, tab1, tab2, tab3, tab4, tab_schedule, tab_retweet = st.tabs([
+                "✨ 投稿案生成", 
+                "📝 投稿案", 
+                "✅ 承認済み", 
+                "📤 送信済み", 
+                "❌ 却下済み", 
+                "📅 スケジュール投稿", 
+                "🔄 リツイート予約"
+            ])
 
-            st.header("投稿案を生成する")
-            
-            # タブで生成方法を選択
-            tab_auto, tab_custom = st.tabs(["🎲 自動生成", "✍️ 直接指示"])
+            with tab_generate:
+                st.subheader("✨ 投稿案を生成する")
+                
+                # タブで生成方法を選択
+                tab_auto, tab_custom = st.tabs(["🎲 自動生成", "✍️ 直接指示"])
             
             with tab_auto:
                 st.subheader("サンプル投稿ベース自動生成")
@@ -3389,15 +3408,8 @@ def main():
                     else:
                         st.error("AIモデルの読み込みに失敗しているため、投稿を生成できません。")
 
-            st.markdown("---")
-            # 選択されたキャストの表示名を作成
-            current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
-            cast_display_name = f"{current_cast['name']}（{current_cast['nickname']}）" if current_cast and current_cast['nickname'] else selected_cast_name
-            st.header(f"「{cast_display_name}」の投稿一覧")
-            
-            tab1, tab2, tab3, tab4, tab_schedule, tab_retweet = st.tabs(["投稿案 (Drafts)", "承認済み (Approved)", "送信済み (Sent)", "却下済み (Rejected)", "📅 スケジュール投稿", "🔄 リツイート予約"])
-
             with tab1:
+                st.subheader("📝 投稿案")
                 # 最新データを確実に取得するため、キャッシュをクリア
                 draft_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'draft' ORDER BY created_at DESC", (selected_cast_id,), fetch="all")
                 if draft_posts:
@@ -3674,6 +3686,7 @@ def main():
                     st.info("チューニング対象の投稿案はありません。")
 
             with tab2:
+                st.subheader("✅ 承認済み")
                 approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
                 if approved_posts:
                     st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
@@ -4227,6 +4240,7 @@ def main():
                 else: st.info("承認済みの投稿はまだありません。")
 
             with tab3:
+                st.subheader("📤 送信済み")
                 # 送信済みタブ
                 sent_posts = execute_query("SELECT p.*, sh.destination, sh.sent_at as send_timestamp, sh.scheduled_datetime FROM posts p LEFT JOIN send_history sh ON p.id = sh.post_id WHERE p.cast_id = ? AND p.sent_status = 'sent' ORDER BY p.sent_at DESC", (selected_cast_id,), fetch="all")
                 if sent_posts:
@@ -4273,6 +4287,7 @@ def main():
                     st.info("送信済みの投稿はまだありません。")
 
             with tab4:
+                st.subheader("❌ 却下済み")
                 rejected_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'rejected' ORDER BY created_at DESC", (selected_cast_id,), fetch="all")
                 if rejected_posts:
                     st.info(f"{len(rejected_posts)}件の投稿が却下されています。")
@@ -4499,10 +4514,6 @@ def main():
                     st.session_state['redirect_to_settings'] = True
                     st.rerun()
                 st.stop()
-            else:
-                # 認証ファイルの基本情報を表示
-                stat = os.stat(adc_file)
-                st.success(f"✅ Google Cloud認証設定済み (更新: {datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')})")
                 
         except Exception as e:
             st.error(f"認証チェックエラー: {e}")
@@ -4539,9 +4550,6 @@ def main():
                 print(f"❌ AI画像投稿: Gemini初期化エラー: {e}")
                 st.session_state.gemini_model = None
         
-        st.title("🎨 AI画像投稿")
-        st.markdown("---")
-        
         # キャスト一覧を取得（MCF DBから）
         casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
         if not casts:
@@ -4549,24 +4557,37 @@ def main():
             st.info("「キャスト管理」でキャストを作成してください")
             st.stop()
         
+        # グローバル選択されたキャストを使用して表示
+        if st.session_state.get('global_selected_cast_id'):
+            cast_id = st.session_state.global_selected_cast_id
+            selected_cast = execute_query("SELECT name, nickname FROM casts WHERE id = ?", (cast_id,), fetch="one")
+            if selected_cast:
+                display_name = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
+                st.success(f"🎭 運営中: **{display_name}** | サイドバーで変更できます")
+        
+        st.title("🎨 AI画像投稿")
+        st.markdown("---")
+        
         # タブメニュー
         tab1, tab2, tab3 = st.tabs(["🎨 新規作成", "📋 投稿履歴", "📊 統計"])
         
         with tab1:
             st.subheader("🎨 新規画像投稿")
             
-            # キャスト選択
-            cast_options = [f"{cast['name']} ({cast['nickname']})" for cast in casts]
-            selected_cast_index = st.selectbox(
-                "投稿するキャスト",
-                range(len(cast_options)),
-                format_func=lambda x: cast_options[x],
-                key="ai_image_cast_selector"
-            )
+            # グローバル選択されたキャストを使用
+            if not st.session_state.get('global_selected_cast_id'):
+                st.warning("⚠️ サイドバーでキャストを選択してください")
+                st.stop()
             
-            selected_cast = casts[selected_cast_index]
-            cast_id = selected_cast['id']
-            cast_name = selected_cast['name']
+            cast_id = st.session_state.global_selected_cast_id
+            selected_cast = execute_query("SELECT name, nickname FROM casts WHERE id = ?", (cast_id,), fetch="one")
+            if selected_cast:
+                cast_name = selected_cast['name']
+                display_name = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
+                st.info(f"🎭 投稿者: **{display_name}** | サイドバーで変更できます")
+            else:
+                st.error("選択されたキャストが見つかりません")
+                st.stop()
             
             # 投稿管理スタイルのレイアウト
             col1, col2 = st.columns([2, 1])
@@ -5142,7 +5163,23 @@ def main():
             else:
                 st.info("統計データがありません")
 
-    elif page == "キャスト管理":
+    elif page == "👤 キャスト管理":
+        # グローバル選択されたキャストを編集対象に設定
+        if st.session_state.get('global_selected_cast_id'):
+            st.session_state.selected_cast_for_edit = st.session_state.global_selected_cast_id
+            
+            # キャスト情報を取得して表示
+            selected_cast = execute_query(
+                "SELECT name, nickname FROM casts WHERE id = ?",
+                (st.session_state.global_selected_cast_id,),
+                fetch="one"
+            )
+            if selected_cast:
+                display_name = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
+                st.success(f"🎭 運営中: **{display_name}** | サイドバーで変更できます")
+        elif 'selected_cast_for_edit' not in st.session_state:
+            st.session_state.selected_cast_for_edit = None
+        
         st.title("👤 キャスト管理")
         
         # 成功メッセージの表示
@@ -5156,8 +5193,10 @@ def main():
                 st.error(msg_content)
             del st.session_state.cast_import_message
         
-        # セッションステート初期化
-        if 'selected_cast_for_edit' not in st.session_state:
+        # グローバル選択されたキャストを編集対象に設定
+        if st.session_state.get('global_selected_cast_id'):
+            st.session_state.selected_cast_for_edit = st.session_state.global_selected_cast_id
+        elif 'selected_cast_for_edit' not in st.session_state:
             st.session_state.selected_cast_for_edit = None
         
         # 3タブ構成（編集、一覧、CSV管理）
@@ -5176,43 +5215,20 @@ def main():
             if not casts:
                 st.info("編集できるキャストがまだいません。CSV管理タブからインポートしてください。")
             else:
-                # キャスト選択
-                cast_options = {f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']: c['id'] for c in casts}
+                # グローバル選択されたキャストを使用
+                if not st.session_state.get('selected_cast_for_edit'):
+                    st.warning("⚠️ サイドバーでキャストを選択してください")
+                    st.stop()
                 
-                # デフォルトインデックス設定
-                default_index = 0
-                if st.session_state.selected_cast_for_edit:
-                    for idx, (display, cid) in enumerate(cast_options.items()):
-                        if cid == st.session_state.selected_cast_for_edit:
-                            default_index = idx
-                            break
-                
-                selected_display = st.selectbox(
-                    "編集するキャストを選択",
-                    list(cast_options.keys()),
-                    index=default_index,
-                    key="edit_cast_selector"
-                )
-                selected_cast_id = cast_options[selected_display]
-                
-                # 選択変更時にsession_state更新
-                if st.session_state.selected_cast_for_edit != selected_cast_id:
-                    st.session_state.selected_cast_for_edit = selected_cast_id
-                    st.rerun()
-                
-                # 選択状態の表示（選択後に表示）
-                if st.session_state.selected_cast_for_edit:
-                    selected_cast = execute_query(
-                        "SELECT name, nickname FROM casts WHERE id = ?",
-                        (st.session_state.selected_cast_for_edit,),
-                        fetch="one"
-                    )
-                    if selected_cast:
-                        display = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
-                        st.success(f"✅ 編集対象: {display}")
+                selected_cast_id = st.session_state.selected_cast_for_edit
                 
                 # キャスト情報取得
                 cast_data = execute_query("SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
+                
+                if not cast_data:
+                    st.error("選択されたキャストが見つかりません")
+                    st.stop()
+                
                 persona_data = execute_query("SELECT * FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,), fetch="one")
                 mission_data = execute_query("SELECT * FROM account_mission WHERE cast_id = ?", (selected_cast_id,), fetch="one")
                 profile_data = execute_query("SELECT * FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,), fetch="one")
@@ -6159,7 +6175,7 @@ def main():
                     except Exception as e:
                         st.error(f"エクスポートエラー: {e}")
 
-    elif page == "アドバイス管理":
+    elif page == "💡 アドバイス管理":
         st.title("💡 アドバイス管理")
         st.markdown("投稿に対するフィードバックの選択肢（アドバイス）を管理します。")
         
@@ -6257,7 +6273,7 @@ def main():
         else:
             st.info("登録済みのアドバイスはありません。")
 
-    elif page == "指針アドバイス":
+    elif page == "📋 指針アドバイス":
         st.title("📋 指針アドバイス管理")
         st.markdown("すべての投稿生成時に自動的に参考にされる指針です。キャストの性格や投稿の基本方針を設定してください。")
         
@@ -6330,7 +6346,7 @@ def main():
         else:
             st.info("📝 グローバル指針がまだ登録されていません。上記のフォームから追加してください。")
 
-    elif page == "システム設定":
+    elif page == "⚙️ システム設定":
         st.title("⚙️ システム設定")
         st.markdown("アプリケーションの各種設定を管理します。")
         

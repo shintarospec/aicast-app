@@ -17,8 +17,9 @@ gatherUsageStats = false
 level = "info"
 
 [theme]
-# AIcast Room ダークテーマ
-primaryColor = "#ff6b6b"
-backgroundColor = "#0e1117"
-secondaryBackgroundColor = "#262730"
-textColor = "#fafafa"
+# AIcast Room サイバーパンクテーマ
+primaryColor = "#00FFFF"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#2F4F4F"
+textColor = "#FFFFFF"
+font = "sans serif"
