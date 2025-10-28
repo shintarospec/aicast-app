@@ -4201,25 +4201,8 @@ def main():
                                     st.info(f"📅 {send_date.strftime('%Y-%m-%d')} {send_time.strftime('%H:%M')} で送信")
                             
                             with col_action:
-                                # 送信先選択
-                                destination_options = [
-                                    ("📊 Google Sheets", "google_sheets"),
-                                    ("🐦 X (Twitter)", "x_api"),
-                                    ("📊🐦 両方に送信", "both")
-                                ]
-                                
-                                selected_destination = st.selectbox(
-                                    "送信先",
-                                    options=[opt[0] for opt in destination_options],
-                                    index=1,  # デフォルトで"🐦 X (Twitter)"を選択
-                                    key=f"destination_{post['id']}"
-                                )
-                                
-                                # 選択された送信先に応じてボタンのラベルを変更
-                                destination_value = next((opt[1] for opt in destination_options if opt[0] == selected_destination), "x_api")
-                                button_label = "📤 送信" if destination_value == "both" else selected_destination
-                                
-                                if st.button(button_label, key=f"send_{post['id']}", type="primary", use_container_width=True):
+                                # 送信はX (Twitter)のみ
+                                if st.button("🐦 X (Twitter) 送信", key=f"send_{post['id']}", type="primary", use_container_width=True):
                                     
                                     # 現在選択中のキャスト名のnameのみを取得
                                     current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
@@ -4252,21 +4235,21 @@ def main():
                                                     (scheduled_at_str, post['id']))
                                         st.session_state.page_status_message = ("success", f"📅 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} にスケジュール投稿を設定しました")
                                     else:
-                                        # 即座投稿：従来通りの処理
-                                        success, message = send_post_to_destination(cast_name_only, post['content'], final_scheduled_datetime, destination_value, cast_id)
+                                        # 即座投稿：X (Twitter)に送信
+                                        success, message = send_post_to_destination(cast_name_only, post['content'], final_scheduled_datetime, "x_api", cast_id)
                                         
                                         if success:
                                             # 送信成功時のデータベース更新
                                             sent_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
                                             execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", (sent_at, post['id']))
                                             execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
-                                                        (post['id'], destination_value, sent_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
+                                                        (post['id'], "x_api", sent_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
                                             st.session_state.page_status_message = ("success", message)
                                         else:
                                             # 送信失敗時のログ記録
                                             failed_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
                                             execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
-                                                        (post['id'], destination_value, failed_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
+                                                        (post['id'], "x_api", failed_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
                                             st.session_state.page_status_message = ("error", message)
                                     st.rerun()
                                 
@@ -4461,15 +4444,8 @@ def main():
 
             with tab_retweet:
                 st.markdown("### 🔄 リツイート・引用ツイート予約")
-                
-                # リツイート設定確認（オプション）
-                retweet_config = get_cast_sheets_config(selected_cast_id, 'retweet')
-                if retweet_config:
-                    st.success(f"✅ Google Sheets設定済み: {retweet_config['sheet_name']}")
-                else:
-                    st.info("💡 Google Sheets設定は任意です。設定すると送信先オプションが追加されます。")
                     
-                # リツイート予約フォーム（Google Sheets設定に関係なく使用可能）
+                # リツイート予約フォーム
                 with st.form("retweet_form"):
                     st.markdown("#### 📝 リツイート予約作成")
                     
@@ -4502,38 +4478,18 @@ def main():
                         help="コメントありの場合は引用ツイート、なしの場合は通常のリツイート"
                     )
                     
-                    # 送信先選択オプション（Google Sheets設定により変動）
-                    if retweet_config:
-                        # Google Sheets設定がある場合は両方のオプション
-                        destination = st.radio(
-                            "📤 送信先選択",
-                            ["Cloud Functions（X API直接・標準）", "Google Sheets（レート制限なし・安定）"],
-                            index=0,
-                            help="Cloud Functions: X API直接、Free Tier制限50回/24h | Google Sheets: GAS経由、レート制限なし、安定動作"
-                        )
-                    else:
-                        # Google Sheets設定がない場合はCloud Functionsのみ
-                        st.info("📤 送信先: Cloud Functions（X API直接）")
-                        destination = "Cloud Functions（X API直接・標準）"
+                    # 送信先はCloud Functions（X API直接）のみ
+                    st.info("📤 送信先: Cloud Functions（X API直接）")
                     
                     if st.form_submit_button("📅 リツイート予約を作成", type="primary"):
                         if tweet_id:
-                            if retweet_config and destination.startswith("Google Sheets"):
-                                # Google Sheets送信（設定がある場合のみ）
-                                success, message = send_retweet_to_google_sheets(
-                                    selected_cast_id, 
-                                    tweet_id, 
-                                    comment, 
-                                    execution_datetime
-                                )
-                            else:
-                                # Cloud Functions直接送信（標準・常に利用可能）
-                                success, message = save_retweet_to_database(
-                                    selected_cast_id,
-                                    tweet_id,
-                                    comment,
-                                    execution_datetime
-                                )
+                            # Cloud Functions直接送信
+                            success, message = save_retweet_to_database(
+                                selected_cast_id,
+                                tweet_id,
+                                comment,
+                                execution_datetime
+                            )
                             
                             if success:
                                 st.success(f"✅ {message}")
@@ -4546,32 +4502,8 @@ def main():
                 st.markdown("---")
                 st.markdown("#### 📋 予約済みリツイート一覧")
                 
-                # Cloud Functions予約とGoogle Sheets予約を分けて表示
-                if retweet_config:
-                    # Google Sheets設定がある場合は2列表示
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("##### 🤖 Cloud Functions予約")
-                        display_retweet_schedules(selected_cast_id)
-                    
-                    with col2:
-                        st.markdown("##### 📊 Google Sheets予約")
-                        st.success("✅ GAS経由でレート制限なし・安定動作中")
-                        st.info("実際の予約状況は設定したGoogle Sheetsで確認できます。")
-                else:
-                    # Google Sheets設定がない場合はCloud Functionsのみ
-                    st.markdown("##### 🤖 Cloud Functions予約")
-                    display_retweet_schedules(selected_cast_id)
-                    st.info("💡 Google Sheets設定を追加すると、レート制限なしの安定した予約オプションが利用できます。")
-                
-                # Google Sheetsリンク（設定がある場合のみ）
-                if retweet_config and st.button("📊 Google Sheetsを開く"):
-                    if 'spreadsheet_id' in retweet_config:
-                        sheets_url = f"https://docs.google.com/spreadsheets/d/{retweet_config['spreadsheet_id']}"
-                        st.markdown(f"[📊 Google Sheetsを開く]({sheets_url})")
-                    else:
-                        st.error("スプレッドシートIDが設定されていません")
+                # Cloud Functions予約のみ表示
+                display_retweet_schedules(selected_cast_id)
 
     elif page == "🎨 AI画像投稿":
         if not AI_IMAGE_AVAILABLE:
