@@ -74,16 +74,16 @@ def main():
     # Google Cloud認証設定
     os.environ["GCP_PROJECT"] = "aicast-472807"
     
-    # Application Default Credentials (ADC) の確認
-    adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+    # サービスアカウントキーを優先、次にApplication Default Credentials (ADC)
     google_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
     
-    if os.path.exists(adc_file):
-        print("✅ Google Cloud Application Default Credentials 確認完了")
-        print(f"📍 認証ファイル: {adc_file}")
-    elif google_creds and os.path.exists(google_creds):
+    if google_creds and os.path.exists(google_creds):
         print("✅ Google Cloud Service Account Key 確認完了")
         print(f"📍 認証ファイル: {google_creds}")
+    elif os.path.exists(adc_file):
+        print("✅ Google Cloud Application Default Credentials 確認完了")
+        print(f"📍 認証ファイル: {adc_file}")
     else:
         print("⚠️  Warning: Google Cloud認証が設定されていません")
         print("💡 アプリは起動しますが、AI機能は認証後に利用可能になります")

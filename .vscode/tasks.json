@@ -4,7 +4,7 @@
         {
             "label": "🚀 AIcast Room 起動",
             "type": "shell",
-            "command": "python3 run.py",
+            "command": "/workspaces/aicast-app/start-with-service-account.sh",
             "group": "build",
             "presentation": {
                 "echo": true,
@@ -44,9 +44,9 @@
             }
         },
         {
-            "label": "🔐 Google Cloud認証",
+            "label": "🔐 Google Cloud認証確認",
             "type": "shell",
-            "command": "gcloud auth application-default login --no-launch-browser",
+            "command": "echo '📍 認証方法: サービスアカウントキー' && echo '📁 認証ファイル: /workspaces/aicast-app/credentials/service-account-key.json' && if [ -f /workspaces/aicast-app/credentials/service-account-key.json ]; then echo '✅ サービスアカウントキーが存在します'; export GOOGLE_APPLICATION_CREDENTIALS=/workspaces/aicast-app/credentials/service-account-key.json && echo '✅ 環境変数を設定しました'; else echo '❌ サービスアカウントキーが見つかりません'; fi",
             "group": "build",
             "presentation": {
                 "echo": true,
@@ -147,6 +147,29 @@
                 "panel": "new"
             },
             "promptOnClose": false
+        },
+        {
+            "label": "🔄 ローカル: Streamlit再起動",
+            "type": "shell",
+            "command": "pkill -f 'streamlit run' && sleep 2 && nohup python3 run.py > /tmp/streamlit.log 2>&1 & sleep 3 && tail -20 /tmp/streamlit.log",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "📋 ローカル: Streamlitログ確認",
+            "type": "shell",
+            "command": "tail -50 /tmp/streamlit.log",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true
+            }
         },
         {
             "label": "🩺 DB: 健全性チェック",

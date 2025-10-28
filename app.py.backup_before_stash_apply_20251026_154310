@@ -360,18 +360,12 @@ DB_FILE = "casting_office.db"
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
 # --- データベースの列定義 ---
-# 必須3項目（新プロンプト構造のコア）
-PERSONA_REQUIRED_FIELDS = ["name", "nickname", "age"]
-
-# オプション項目（キャラクター設定タブで管理）
-PERSONA_OPTIONAL_FIELDS = [
-    "birthday", "personality", "strength", "weakness", 
-    "first_person", "speech_style", "catchphrase",
-    "occupation", "hobby", "likes", "dislikes", "dream", "secret"
+PERSONA_FIELDS = [
+    "name", "nickname", "age", "birthday", "birthplace", "appearance",
+    "personality", "strength", "weakness", "first_person", "speech_style", "catchphrase", "customer_interaction",
+    "occupation", "hobby", "likes", "dislikes", "holiday_activity", "dream", "reason_for_job", "secret",
+    "allowed_categories"
 ]
-
-# 全項目（互換性維持用、段階的移行のため残す）
-PERSONA_FIELDS = PERSONA_REQUIRED_FIELDS + PERSONA_OPTIONAL_FIELDS
 
 # --- データベース関数 ---
 def execute_query(query, params=(), fetch=None):
@@ -420,14 +414,8 @@ def init_db():
     category_advice_table_query = "CREATE TABLE IF NOT EXISTS category_advice (id INTEGER PRIMARY KEY, category_id INTEGER, title TEXT NOT NULL, content TEXT NOT NULL, is_active INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, sort_order INTEGER DEFAULT 0, FOREIGN KEY(category_id) REFERENCES situation_categories(id) ON DELETE CASCADE)"
     cast_x_credentials_table_query = "CREATE TABLE IF NOT EXISTS cast_x_credentials (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, api_key TEXT, api_secret TEXT, bearer_token TEXT, access_token TEXT, access_token_secret TEXT, twitter_username TEXT, twitter_user_id TEXT, is_active INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
     cast_sheets_config_table_query = "CREATE TABLE IF NOT EXISTS cast_sheets_config (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, spreadsheet_id TEXT, sheet_name TEXT DEFAULT 'sheet1', credentials_file_path TEXT, is_active INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
-    
-    # 新しいプロンプト構造用テーブル（柔軟な設計 - 将来の変更に対応）
-    account_mission_table_query = "CREATE TABLE IF NOT EXISTS account_mission (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, mission TEXT, persona_design TEXT, content_strategy TEXT, final_goal TEXT, additional_notes TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
-    persona_detailed_table_query = "CREATE TABLE IF NOT EXISTS persona_detailed (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, archetype TEXT, occupation TEXT, residence TEXT, family_structure TEXT, symbolic_quote TEXT, x_usage_purpose TEXT, behavior_pattern TEXT, interested_topics TEXT, platform_pain_points TEXT, brand_relationship TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
-    sample_profiles_table_query = "CREATE TABLE IF NOT EXISTS sample_profiles (id INTEGER PRIMARY KEY, cast_id INTEGER UNIQUE, profile_text TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
-    sample_posts_table_query = "CREATE TABLE IF NOT EXISTS sample_posts (id INTEGER PRIMARY KEY, cast_id INTEGER, category TEXT, post_content TEXT NOT NULL, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(cast_id) REFERENCES casts(id) ON DELETE CASCADE)"
 
-    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query, app_settings_table_query, global_advice_table_query, category_advice_table_query, cast_x_credentials_table_query, cast_sheets_config_table_query, account_mission_table_query, persona_detailed_table_query, sample_profiles_table_query, sample_posts_table_query]
+    queries = [casts_table_query, posts_table_query, situations_table_query, categories_table_query, advice_table_query, groups_table_query, cast_groups_table_query, tuning_history_table_query, custom_fields_table_query, send_history_table_query, app_settings_table_query, global_advice_table_query, category_advice_table_query, cast_x_credentials_table_query, cast_sheets_config_table_query]
     for query in queries: execute_query(query)
     
     # generated_atカラムが存在しない場合は追加
@@ -440,28 +428,6 @@ def init_db():
             execute_query("ALTER TABLE posts ADD COLUMN generated_at TEXT")
     except Exception as e:
         # カラム追加でエラーが発生した場合は無視（既に存在する場合など）
-        pass
-    
-    # persona_detailedテーブルにmain_follow_targetsカラムを追加（存在しない場合）
-    try:
-        persona_column_check = execute_query("PRAGMA table_info(persona_detailed)", fetch="all")
-        persona_column_names = [col['name'] for col in persona_column_check]
-        
-        if 'main_follow_targets' not in persona_column_names:
-            execute_query("ALTER TABLE persona_detailed ADD COLUMN main_follow_targets TEXT")
-            print("✅ persona_detailedテーブルに main_follow_targets カラムを追加しました")
-        
-        # XサンプルID・Xサンプルネームカラムを追加（3つ分）
-        for i in range(1, 4):
-            if f'x_sample_id_{i}' not in persona_column_names:
-                execute_query(f"ALTER TABLE persona_detailed ADD COLUMN x_sample_id_{i} TEXT")
-                print(f"✅ persona_detailedテーブルに x_sample_id_{i} カラムを追加しました")
-            
-            if f'x_sample_name_{i}' not in persona_column_names:
-                execute_query(f"ALTER TABLE persona_detailed ADD COLUMN x_sample_name_{i} TEXT")
-                print(f"✅ persona_detailedテーブルに x_sample_name_{i} カラムを追加しました")
-    except Exception as e:
-        print(f"⚠️ persona_detailedカラム追加時のエラー: {e}")
         pass
     
     if execute_query("SELECT COUNT(*) as c FROM situation_categories", fetch="one")['c'] == 0:
@@ -592,239 +558,15 @@ def format_persona(cast_id, cast_data):
     group_rows = execute_query("SELECT g.name, g.content FROM groups g JOIN cast_groups cg ON g.id = cg.group_id WHERE cg.cast_id = ?", (cast_id,), fetch="all")
     group_text = "\n\n## 4. 所属グループ共通設定\n" + "".join([f"- **{row['name']}**: {row['content']}\n" for row in group_rows]) if group_rows else ""
     return f"""
-# キャラクター設定シート：{(cast_data['name'] if cast_data and 'name' in cast_data else '')}
+# キャラクター設定シート：{cast_data.get('name', '')}
 ## 1. 基本情報
-- 名前: {(cast_data['name'] if cast_data and 'name' in cast_data else '')}, ニックネーム: {(cast_data['nickname'] if cast_data and 'nickname' in cast_data else '')}, 年齢: {(cast_data['age'] if cast_data and 'age' in cast_data else '')}, 誕生日: {(cast_data['birthday'] if cast_data and 'birthday' in cast_data else '')}, 出身地: {(cast_data['birthplace'] if cast_data and 'birthplace' in cast_data else '')}, 外見の特徴: {(cast_data['appearance'] if cast_data and 'appearance' in cast_data else '')}
+- 名前: {cast_data.get('name', '')}, ニックネーム: {cast_data.get('nickname', '')}, 年齢: {cast_data.get('age', '')}, 誕生日: {cast_data.get('birthday', '')}, 出身地: {cast_data.get('birthplace', '')}, 外見の特徴: {cast_data.get('appearance', '')}
 ## 2. 性格・話し方
-- 性格: {(cast_data['personality'] if cast_data and 'personality' in cast_data else '')}, 長所: {(cast_data['strength'] if cast_data and 'strength' in cast_data else '')}, 短所: {(cast_data['weakness'] if cast_data and 'weakness' in cast_data else '')}, 一人称: {(cast_data['first_person'] if cast_data and 'first_person' in cast_data else '')}, 口調・語尾: {(cast_data['speech_style'] if cast_data and 'speech_style' in cast_data else '')}, 口癖: {(cast_data['catchphrase'] if cast_data and 'catchphrase' in cast_data else '')}, お客様への接し方: {(cast_data['customer_interaction'] if cast_data and 'customer_interaction' in cast_data else '')}
+- 性格: {cast_data.get('personality', '')}, 長所: {cast_data.get('strength', '')}, 短所: {cast_data.get('weakness', '')}, 一人称: {cast_data.get('first_person', '')}, 口調・語尾: {cast_data.get('speech_style', '')}, 口癖: {cast_data.get('catchphrase', '')}, お客様への接し方: {cast_data.get('customer_interaction', '')}
 ## 3. 背景ストーリー
-- 職業／学業: {(cast_data['occupation'] if cast_data and 'occupation' in cast_data else '')}, 趣味や特技: {(cast_data['hobby'] if cast_data and 'hobby' in cast_data else '')}, 好きなもの: {(cast_data['likes'] if cast_data and 'likes' in cast_data else '')}, 嫌いなもの: {(cast_data['dislikes'] if cast_data and 'dislikes' in cast_data else '')}, 休日の過ごし方: {(cast_data['holiday_activity'] if cast_data and 'holiday_activity' in cast_data else '')}, 将来の夢: {(cast_data['dream'] if cast_data and 'dream' in cast_data else '')}, なぜこの仕事をしているのか: {(cast_data['reason_for_job'] if cast_data and 'reason_for_job' in cast_data else '')}, ちょっとした秘密: {(cast_data['secret'] if cast_data and 'secret' in cast_data else '')}
+- 職業／学業: {cast_data.get('occupation', '')}, 趣味や特技: {cast_data.get('hobby', '')}, 好きなもの: {cast_data.get('likes', '')}, 嫌いなもの: {cast_data.get('dislikes', '')}, 休日の過ごし方: {cast_data.get('holiday_activity', '')}, 将来の夢: {cast_data.get('dream', '')}, なぜこの仕事をしているのか: {cast_data.get('reason_for_job', '')}, ちょっとした秘密: {cast_data.get('secret', '')}
 {group_text}
 """
-
-# =========================================
-# 新プロンプト生成関数（柔軟性・拡張性重視）
-# =========================================
-
-def get_account_mission_prompt(cast_id):
-    """アカウント運営指針を取得してMarkdown形式で返す"""
-    mission_data = execute_query(
-        "SELECT mission, persona_design, content_strategy, final_goal, additional_notes FROM account_mission WHERE cast_id = ?",
-        (cast_id,),
-        fetch="one"
-    )
-    
-    if not mission_data:
-        return ""  # 設定なしの場合は空文字列
-    
-    sections = []
-    
-    if mission_data and mission_data['mission']:
-        sections.append(f"## アカウント運営指針\n{mission_data['mission']}")
-    
-    if mission_data and mission_data['persona_design']:
-        sections.append(f"## ペルソナ設計\n{mission_data['persona_design']}")
-    
-    if mission_data and mission_data['content_strategy']:
-        sections.append(f"## コンテンツ戦略\n{mission_data['content_strategy']}")
-    
-    if mission_data and mission_data['final_goal']:
-        sections.append(f"## 最終ゴール\n{mission_data['final_goal']}")
-    
-    if mission_data and mission_data['additional_notes']:
-        sections.append(f"## 補足事項\n{mission_data['additional_notes']}")
-    
-    return "\n\n".join(sections)
-
-
-def get_detailed_persona_prompt(cast_id):
-    """詳細ペルソナを取得してCSV形式で返す"""
-    persona_data = execute_query(
-        """SELECT archetype, occupation, residence, family_structure, symbolic_quote, 
-                  x_usage_purpose, behavior_pattern, interested_topics, platform_pain_points, brand_relationship
-           FROM persona_detailed WHERE cast_id = ?""",
-        (cast_id,),
-        fetch="one"
-    )
-    
-    if not persona_data:
-        return ""  # 設定なしの場合は空文字列
-    
-    # CSV形式で構造化
-    lines = []
-    
-    if persona_data and persona_data['archetype']:
-        lines.append(f"アーキタイプ: {persona_data['archetype']}")
-    
-    if persona_data and persona_data['occupation']:
-        lines.append(f"職業: {persona_data['occupation']}")
-    
-    if persona_data and persona_data['residence']:
-        lines.append(f"居住地: {persona_data['residence']}")
-    
-    if persona_data and persona_data['family_structure']:
-        lines.append(f"家族構成: {persona_data['family_structure']}")
-    
-    if persona_data and persona_data['symbolic_quote']:
-        lines.append(f"象徴的な一言: {persona_data['symbolic_quote']}")
-    
-    if persona_data and persona_data['x_usage_purpose']:
-        lines.append(f"X利用目的: {persona_data['x_usage_purpose']}")
-    
-    if persona_data and persona_data['behavior_pattern']:
-        lines.append(f"行動パターン: {persona_data['behavior_pattern']}")
-    
-    if persona_data and persona_data['interested_topics']:
-        lines.append(f"関心トピック: {persona_data['interested_topics']}")
-    
-    # main_follow_targetsは新規カラムのため存在チェック
-    try:
-        if persona_data and persona_data['main_follow_targets']:
-            lines.append(f"主なフォロー対象: {persona_data['main_follow_targets']}")
-    except (KeyError, IndexError):
-        pass
-    
-    if persona_data and persona_data['platform_pain_points']:
-        lines.append(f"プラットフォーム不満: {persona_data['platform_pain_points']}")
-    
-    if persona_data and persona_data['brand_relationship']:
-        lines.append(f"ブランド関係: {persona_data['brand_relationship']}")
-    
-    if lines:
-        return "## 詳細ペルソナ\n" + "\n".join(lines)
-    else:
-        return ""
-
-
-def get_sample_profile_prompt(cast_id):
-    """サンプルプロフィールを取得"""
-    profile_data = execute_query(
-        "SELECT profile_text FROM sample_profiles WHERE cast_id = ?",
-        (cast_id,),
-        fetch="one"
-    )
-    
-    if not profile_data or not (profile_data and profile_data['profile_text']):
-        return ""
-    
-    return f"## サンプルプロフィール\n{profile_data['profile_text']}"
-
-
-def get_sample_posts_prompt(cast_id, category=None, limit=100):
-    """サンプル投稿を取得してプロンプト形式で返す
-    
-    Args:
-        cast_id: キャストID
-        category: カテゴリ指定（Noneの場合は全カテゴリ、文字列の場合はそのカテゴリのみ）
-        limit: 取得件数上限
-    
-    Returns:
-        プロンプト文字列（カテゴリごとに整理）
-    """
-    if category:
-        # 特定カテゴリのみ取得
-        posts = execute_query(
-            "SELECT category, post_content FROM sample_posts WHERE cast_id = ? AND category = ? ORDER BY sort_order, id LIMIT ?",
-            (cast_id, category, limit),
-            fetch="all"
-        )
-    else:
-        # 全カテゴリ取得
-        posts = execute_query(
-            "SELECT category, post_content FROM sample_posts WHERE cast_id = ? ORDER BY sort_order, id LIMIT ?",
-            (cast_id, limit),
-            fetch="all"
-        )
-    
-    if not posts:
-        return ""
-    
-    # カテゴリごとに整理
-    category_posts = {}
-    for post in posts:
-        cat = post['category'] or "その他"
-        if cat not in category_posts:
-            category_posts[cat] = []
-        category_posts[cat].append(post['post_content'])
-    
-    # プロンプト生成
-    sections = ["## サンプル投稿"]
-    for cat, post_list in category_posts.items():
-        sections.append(f"\n### {cat}")
-        for i, content in enumerate(post_list, 1):
-            sections.append(f"{i}. {content}")
-    
-    return "\n".join(sections)
-
-
-def build_full_prompt(cast_id, situation_or_instruction, char_limit=140, is_custom_instruction=False):
-    """フルプロンプトを構築（新プロンプト構造専用）
-    
-    新プロンプト構造：
-    1. 基本ペルソナ（必須3項目：name, nickname, age）
-    2. アカウント運営指針（オプション）
-    3. 詳細ペルソナ（オプション）
-    4. サンプルプロフィール（オプション）
-    5. サンプル投稿（オプション）
-    6. シチュエーションまたは指示
-    7. 生成ルール
-    
-    Args:
-        cast_id: キャストID
-        situation_or_instruction: シチュエーション文字列または指示文字列
-        char_limit: 文字数上限
-        is_custom_instruction: カスタム指示かどうか
-    
-    Returns:
-        完全なプロンプト文字列
-    """
-    sections = []
-    
-    # 1. 基本ペルソナ（必須3項目）
-    cast_data = execute_query("SELECT name, nickname, age FROM casts WHERE id = ?", (cast_id,), fetch="one")
-    if cast_data:
-        basic_info = f"# キャラクター：{cast_data['name']}（{cast_data['nickname']}）\n年齢: {cast_data['age']}歳"
-        sections.append(basic_info)
-    
-    # 2. アカウント運営指針（オプション）
-    account_mission = get_account_mission_prompt(cast_id)
-    if account_mission:
-        sections.append(account_mission)
-    
-    # 3. 詳細ペルソナ（オプション）
-    detailed_persona = get_detailed_persona_prompt(cast_id)
-    if detailed_persona:
-        sections.append(detailed_persona)
-    
-    # 4. サンプルプロフィール（オプション）
-    sample_profile = get_sample_profile_prompt(cast_id)
-    if sample_profile:
-        sections.append(sample_profile)
-    
-    # 5. サンプル投稿（オプション）
-    sample_posts = get_sample_posts_prompt(cast_id)
-    if sample_posts:
-        sections.append(sample_posts)
-    
-    # 6. シチュエーションまたは指示
-    if is_custom_instruction:
-        sections.append(f"## 投稿生成の指示\n{situation_or_instruction}")
-    else:
-        sections.append(f"## シチュエーション\n{situation_or_instruction}")
-    
-    # 7. 生成ルール
-    generation_rules = f"""
-## 生成ルール
-- 上記のキャラクター設定・運営指針・サンプルに基づいて投稿を生成してください
-- 文字数は{char_limit}文字以内に収めてください
-- サンプル投稿がある場合は、同じような雰囲気・トーン・スタイルで書いてください
-- 改行は適切に使用し、読みやすさを重視してください
-- 投稿内容のみを生成し、説明や前置きは不要です
-"""
-    sections.append(generation_rules)
-    
-    return "\n\n".join(sections)
-
 
 def load_css(file_name):
     try:
@@ -2727,7 +2469,7 @@ def main():
                 st.rerun()
     
     # メニューの選択肢
-    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "キャスト管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
+    menu_options = ["📊 ダッシュボード", "投稿管理", "🎨 AI画像投稿", "一斉指示", "キャスト管理", "シチュエーション管理", "カテゴリ管理", "グループ管理", "アドバイス管理", "指針アドバイス", "システム設定"]
     
     # 保存されたページを取得（リロード後の復帰用）
     saved_page = get_current_page()
@@ -3188,21 +2930,7 @@ def main():
                                     
                                     for i in range(num_posts):
                                         selected_situation = random.choice(situations_rows)
-                                        # まず sample_posts を優先してプロンプト指示を決定（新構造）。なければ既存のシチュエーションを使用
-                                        sample_posts_rows = execute_query(
-                                            "SELECT category, post_content FROM sample_posts WHERE cast_id = ? ORDER BY sort_order, id",
-                                            (selected_cast_id,),
-                                            fetch="all"
-                                        )
-                                        if sample_posts_rows:
-                                            # sample_posts がある場合はランダムで1件を指示に使う
-                                            selected_sample = random.choice(sample_posts_rows)
-                                            instruction_text = selected_sample['post_content'] if selected_sample else ''
-                                        else:
-                                            instruction_text = selected_situation['content'] if selected_situation else ''
-
-                                        # 新しいフルプロンプトを組み立て（フォールバックは build_full_prompt 内で実施）
-                                        prompt_template = build_full_prompt(selected_cast_id, instruction_text, char_limit=char_limit, is_custom_instruction=False)
+                                        prompt_template = f"""# ペルソナ\n{persona_sheet}\n\n# シチュエーション\n{selected_situation['content']}\n\n# ルール\nSNS投稿を**{char_limit}文字以内**で生成。\n\n# 出力形式\n投稿内容のみを出力してください。例文、説明、番号付けは不要です。"""
                                         
                                         # リトライ機能付きAPI呼び出し
                                         max_retries = 3
@@ -3338,9 +3066,15 @@ def main():
                                         if custom_num_posts > 1:
                                             variation_instruction = f"\n\n# バリエーション指示\n同じテーマで{i+1}番目の投稿として、少し異なる視点や表現で投稿してください。"
                                         
-                                        # 直接指示用プロンプト（新プロンプト構造を利用）
-                                        instruction_text = custom_instruction.strip() + variation_instruction
-                                        custom_prompt = build_full_prompt(selected_cast_id, instruction_text, char_limit=custom_char_limit, is_custom_instruction=True)
+                                        # 直接指示用プロンプト
+                                        custom_prompt = f"""# ペルソナ
+{persona_sheet}
+
+# 投稿指示
+{custom_instruction.strip()}{variation_instruction}
+
+# ルール
+上記の指示に従って、このキャラクターらしいSNS投稿を**{custom_char_limit}文字以内**で生成してください。キャラクターの個性、口調、趣味嗜好を反映させてください。"""
 
                                         # AI生成実行（リトライ機能付き）
                                         max_retries = 3
@@ -3587,9 +3321,24 @@ def main():
                                         if not cast_info:
                                             continue
                                         
-                                        # build_full_prompt を使って改善プロンプトを構築（フォールバック含む）
-                                        instruction_text = f"元の投稿:\n{original_post['content']}\n\n改善指示:\n- {instructions_text}"
-                                        improvement_prompt = build_full_prompt(original_post['cast_id'], instruction_text, char_limit=140, is_custom_instruction=True)
+                                        # ペルソナシートを作成
+                                        persona_sheet = ""
+                                        for field in PERSONA_FIELDS:
+                                            if cast_info[field]:
+                                                persona_sheet += f"**{field}**: {cast_info[field]}\n"
+                                        
+                                        # 改善プロンプトを作成
+                                        improvement_prompt = f"""# ペルソナ
+{persona_sheet}
+
+# 元の投稿
+{original_post['content']}
+
+# 改善指示
+- {instructions_text}
+
+# ルール
+上記の改善指示に従って投稿を改善してください。キャラクターの個性を保ちながら、指示された点を改善した新しい投稿を生成してください。元の投稿のテーマとメッセージは維持してください。"""
 
                                         # AI で改善
                                         response = safe_generate_content(st.session_state.gemini_model, improvement_prompt)
@@ -4917,11 +4666,7 @@ def main():
                                             (cast_id,)
                                         )
                                         if cast_details:
-                                            cast_row = execute_query("SELECT name, nickname, age FROM casts WHERE id = ?", (cast_details[0],), fetch="one")
-                                            if cast_row:
-                                                persona_sheet = f"# キャラクター：{cast_row.get('name','')}（{cast_row.get('nickname','')}）\n年齢: {cast_row.get('age','')}歳"
-                                            else:
-                                                persona_sheet = f"キャスト名: {cast_name}"
+                                            persona_sheet = format_persona(cast_details[0], include_x_username=False)
                                         else:
                                             persona_sheet = f"キャスト名: {cast_name}"
                                     else:
@@ -5046,11 +4791,7 @@ def main():
                                             if cast_id:
                                                 cast_details = execute_query("SELECT * FROM casts WHERE id = ?", (cast_id,))
                                                 if cast_details:
-                                                    cast_row = execute_query("SELECT name, nickname, age FROM casts WHERE id = ?", (cast_details[0],), fetch="one")
-                                                    if cast_row:
-                                                        persona_sheet = f"# キャラクター：{cast_row.get('name','')}（{cast_row.get('nickname','')}）\n年齢: {cast_row.get('age','')}歳"
-                                                    else:
-                                                        persona_sheet = f"キャスト名: {st.session_state.get('selected_cast_name', '')}"
+                                                    persona_sheet = format_persona(cast_details[0], include_x_username=False)
                                                 else:
                                                     persona_sheet = f"キャスト名: {st.session_state.get('selected_cast_name', '')}"
                                             else:
@@ -5375,10 +5116,63 @@ def main():
             else:
                 st.info("統計データがありません")
 
+    elif page == "一斉指示":
+        st.title("📣 一斉指示（キャンペーン）")
+        casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
+        if not casts:
+            st.warning("キャスト未登録です。「キャスト管理」で作成してください。"); st.stop()
+        
+        # キャスト表示名を「name（nickname）」形式で作成
+        cast_options = {}
+        cast_display_options = []
+        for cast in casts:
+            display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+            cast_options[display_name] = cast['id']
+            cast_display_options.append(display_name)
+        
+        selected_cast_names = st.multiselect("対象キャストを選択（複数可）", cast_display_options, default=cast_display_options)
+        st.markdown("---")
+        with st.form(key="campaign_form"):
+            st.subheader("指示内容")
+            campaign_placeholder = get_app_setting("campaign_placeholder", "例：「グッチセール」というキーワードと、URL「https://gucci.com/sale」を必ず文末に入れて、セールをお知らせする投稿を作成してください。")
+            campaign_instruction = st.text_area("具体的な指示内容*", placeholder=campaign_placeholder)
+            default_char_limit = int(get_app_setting("default_char_limit", "140"))
+            char_limit = st.number_input("文字数（以内）", min_value=20, max_value=300, value=default_char_limit)
+            if st.form_submit_button("選択したキャスト全員に投稿を生成させる", type="primary"):
+                if not selected_cast_names:
+                    st.error("対象キャストを1名以上選択してください。")
+                elif not campaign_instruction:
+                    st.error("具体的な指示内容を入力してください。")
+                elif st.session_state.get('gemini_model'):
+                    total_casts = len(selected_cast_names)
+                    progress_bar = st.progress(0, text="生成を開始します...")
+                    for i, cast_name in enumerate(selected_cast_names):
+                        cast_id = cast_options[cast_name]
+                        progress_bar.progress((i + 1) / total_casts, text=f"キャスト「{cast_name}」の投稿を生成中... ({i+1}/{total_casts})")
+                        cast_details_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (cast_id,), fetch="one")
+                        cast_details = dict(cast_details_row) if cast_details_row else None
+                        if cast_details:
+                            persona_sheet = format_persona(cast_id, cast_details)
+                            prompt = f"""# ペルソナ\n{persona_sheet}\n\n# 特別な指示\n{campaign_instruction}\n\n# ルール\nSNS投稿を**{char_limit}文字以内**で生成。"""
+                            try:
+                                response = safe_generate_content(st.session_state.gemini_model, prompt)
+                                generated_text = clean_generated_content(response.text)
+                                created_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                theme = f"一斉指示：{campaign_instruction[:20]}..."
+                                execute_query("INSERT INTO posts (cast_id, created_at, content, theme) VALUES (?, ?, ?, ?)", (cast_id, created_at, generated_text, theme))
+                                time.sleep(5)
+                            except Exception as e:
+                                st.warning(f"キャスト「{cast_name}」の生成中にエラーが発生しました: {e}")
+                                continue
+                    st.success("すべての一斉指示投稿の生成が完了しました！「投稿管理」ページの「投稿案」タブで確認・チューニングしてください。")
+                    st.balloons()
+                else:
+                    st.error("AIモデルの読み込みに失敗しているため、投稿を生成できません。")
+
     elif page == "キャスト管理":
         st.title("👤 キャスト管理")
         
-        # 成功メッセージの表示
+        # 成功メッセージの表示（全体共通）
         if "cast_import_message" in st.session_state:
             msg_type, msg_content = st.session_state.cast_import_message
             if msg_type == "success":
@@ -5389,998 +5183,1316 @@ def main():
                 st.error(msg_content)
             del st.session_state.cast_import_message
         
-        # セッションステート初期化
-        if 'selected_cast_for_edit' not in st.session_state:
-            st.session_state.selected_cast_for_edit = None
+        # フィールド管理タブを追加
+        individual_tab, csv_tab, field_tab, ai_gen_tab = st.tabs(["👤 個別管理", "📊 CSV管理", "⚙️ フィールド管理", "🤖 AI自動生成"])
         
-        # 3タブ構成（編集、一覧、CSV管理）
-        tab_edit, tab_list, tab_csv = st.tabs([
-            "✏️ 編集",
-            "👥 キャスト一覧", 
-            "📥 CSV管理"
-        ])
-        
-        # ==================== タブ1: 編集 ====================
-        with tab_edit:
-            st.header("既存キャストの編集・削除")
+        with field_tab:
+            st.header("キャスト項目の管理")
+            st.markdown("キャストプロフィールの項目を動的に追加・削除できます。")
             
-            casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
-            
-            if not casts:
-                st.info("編集できるキャストがまだいません。CSV管理タブからインポートしてください。")
-            else:
-                # 選択状態の表示
-                if st.session_state.selected_cast_for_edit:
-                    selected_cast = execute_query(
-                        "SELECT name, nickname FROM casts WHERE id = ?",
-                        (st.session_state.selected_cast_for_edit,),
-                        fetch="one"
-                    )
-                    if selected_cast:
-                        display = f"{selected_cast['name']}（{selected_cast['nickname']}）" if selected_cast['nickname'] else selected_cast['name']
-                        st.success(f"✅ 編集対象: {display}")
-                
-                # キャスト選択
-                cast_options = {f"{c['name']}（{c['nickname']}）" if c['nickname'] else c['name']: c['id'] for c in casts}
-                
-                default_index = 0
-                if st.session_state.selected_cast_for_edit:
-                    for idx, (display, cid) in enumerate(cast_options.items()):
-                        if cid == st.session_state.selected_cast_for_edit:
-                            default_index = idx
-                            break
-                
-                selected_display = st.selectbox(
-                    "編集するキャストを選択",
-                    list(cast_options.keys()),
-                    index=default_index,
-                    key="edit_cast_selector"
-                )
-                selected_cast_id = cast_options[selected_display]
-                
-                if st.session_state.selected_cast_for_edit != selected_cast_id:
-                    st.session_state.selected_cast_for_edit = selected_cast_id
-                
-                # キャスト情報取得
-                cast_data = execute_query("SELECT * FROM casts WHERE id = ?", (selected_cast_id,), fetch="one")
-                persona_data = execute_query("SELECT * FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,), fetch="one")
-                mission_data = execute_query("SELECT * FROM account_mission WHERE cast_id = ?", (selected_cast_id,), fetch="one")
-                profile_data = execute_query("SELECT * FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,), fetch="one")
-                x_creds = get_cast_x_credentials(selected_cast_id)
-                
-                if cast_data:
-                    # 編集用サブタブ（5つ）
-                    persona_edit_tab, mission_edit_tab, character_edit_tab, xapi_edit_tab, sample_post_edit_tab = st.tabs([
-                        "👤 ペルソナ管理",
-                        "📋 運営指針", 
-                        "🎭 キャラクター設定",
-                        "🔐 X API設定",
-                        "📝 サンプル投稿"
-                    ])
+            # 新しいフィールドの追加
+            with st.expander("🆕 新しい項目を追加", expanded=False):
+                with st.form("add_custom_field"):
+                    col1, col2 = st.columns(2)
+                    new_field_name = col1.text_input("項目ID（英数字のみ）", placeholder="例: favorite_food")
+                    new_display_name = col2.text_input("表示名", placeholder="例: 好きな食べ物")
                     
-                    with persona_edit_tab:
-                        st.markdown("### 📌 必須項目")
-                        col1, col2, col3 = st.columns(3)
-                        edit_name = col1.text_input("ユーザー名*", value=cast_data['name'] or '', key=f"edit_name_{selected_cast_id}")
-                        edit_nickname = col2.text_input("名前*", value=cast_data['nickname'] or '', key=f"edit_nickname_{selected_cast_id}")
-                        
-                        # 年齢：抽出データがあれば優先
-                        age_val = st.session_state.get(f'parsed_age_{selected_cast_id}', str(cast_data['age']) if cast_data['age'] else '')
-                        edit_age = col3.text_input("年齢*", value=age_val, key=f"edit_age_{selected_cast_id}")
-                        
-                        st.markdown("### 🔍 詳細ペルソナ")
-                        st.info("💡 運営指針タブの「テキスト一括インポート」で抽出したデータがある場合、自動反映されます")
-                        
-                        with st.expander("詳細ペルソナを編集", expanded=True):
-                            col1, col2 = st.columns(2)
-                            
-                            # 各フィールド：抽出データがあれば優先、なければDB値
-                            archetype_val = st.session_state.get(f'parsed_archetype_{selected_cast_id}', persona_data['archetype'] if persona_data and persona_data['archetype'] else '')
-                            occupation_val = st.session_state.get(f'parsed_occupation_{selected_cast_id}', persona_data['occupation'] if persona_data and persona_data['occupation'] else '')
-                            residence_val = st.session_state.get(f'parsed_residence_{selected_cast_id}', persona_data['residence'] if persona_data and persona_data['residence'] else '')
-                            family_val = st.session_state.get(f'parsed_family_{selected_cast_id}', persona_data['family_structure'] if persona_data and persona_data['family_structure'] else '')
-                            quote_val = st.session_state.get(f'parsed_quote_{selected_cast_id}', persona_data['symbolic_quote'] if persona_data and persona_data['symbolic_quote'] else '')
-                            x_purpose_val = st.session_state.get(f'parsed_x_purpose_{selected_cast_id}', persona_data['x_usage_purpose'] if persona_data and persona_data['x_usage_purpose'] else '')
-                            behavior_val = st.session_state.get(f'parsed_behavior_{selected_cast_id}', persona_data['behavior_pattern'] if persona_data and persona_data['behavior_pattern'] else '')
-                            topics_val = st.session_state.get(f'parsed_topics_{selected_cast_id}', persona_data['interested_topics'] if persona_data and persona_data['interested_topics'] else '')
-                            # main_follow_targetsは新規カラムのため存在チェック
-                            follow_val = st.session_state.get(f'parsed_follow_{selected_cast_id}', '')
-                            if persona_data and not follow_val:
-                                try:
-                                    follow_val = persona_data['main_follow_targets'] if persona_data['main_follow_targets'] else ''
-                                except (KeyError, IndexError):
-                                    follow_val = ''
-                            pain_val = st.session_state.get(f'parsed_pain_{selected_cast_id}', persona_data['platform_pain_points'] if persona_data and persona_data['platform_pain_points'] else '')
-                            brand_val = st.session_state.get(f'parsed_brand_{selected_cast_id}', persona_data['brand_relationship'] if persona_data and persona_data['brand_relationship'] else '')
-                            
-                            # XサンプルID・ニックネーム（新規カラム）
-                            x_sample_id_val = st.session_state.get(f'parsed_x_sample_id_{selected_cast_id}', '')
-                            x_sample_name_val = st.session_state.get(f'parsed_x_sample_name_{selected_cast_id}', '')
-                            if persona_data and not x_sample_id_val:
-                                try:
-                                    x_sample_id_val = persona_data['x_sample_id'] if persona_data['x_sample_id'] else ''
-                                except (KeyError, IndexError):
-                                    x_sample_id_val = ''
-                            if persona_data and not x_sample_name_val:
-                                try:
-                                    x_sample_name_val = persona_data['x_sample_name'] if persona_data['x_sample_name'] else ''
-                                except (KeyError, IndexError):
-                                    x_sample_name_val = ''
-                            
-                            edit_archetype = col1.text_input("アーキタイプ", value=archetype_val, key=f"edit_archetype_{selected_cast_id}")
-                            edit_occupation = col2.text_input("職業", value=occupation_val, key=f"edit_occupation_{selected_cast_id}")
-                            edit_residence = col1.text_input("居住地", value=residence_val, key=f"edit_residence_{selected_cast_id}")
-                            edit_family = col2.text_input("家族構成", value=family_val, key=f"edit_family_{selected_cast_id}")
-                            edit_quote = st.text_input("象徴的な一言", value=quote_val, key=f"edit_quote_{selected_cast_id}")
-                            edit_x_purpose = st.text_input("X利用目的", value=x_purpose_val, key=f"edit_x_purpose_{selected_cast_id}")
-                            edit_behavior = st.text_area("行動パターン", value=behavior_val, key=f"edit_behavior_{selected_cast_id}")
-                            edit_topics = st.text_input("関心トピック", value=topics_val, key=f"edit_topics_{selected_cast_id}")
-                            edit_follow = st.text_input("主なフォロー対象", value=follow_val, key=f"edit_follow_{selected_cast_id}")
-                            edit_pain = st.text_input("プラットフォーム不満", value=pain_val, key=f"edit_pain_{selected_cast_id}")
-                            edit_brand = st.text_input("ブランド関係", value=brand_val, key=f"edit_brand_{selected_cast_id}")
-                            
-                            st.markdown("#### 🎲 Xアカウントサンプル（ランダム3つ選択）")
-                            # 3組のサンプルアカウント
-                            edit_x_samples_id = []
-                            edit_x_samples_name = []
-                            for i in range(1, 4):
-                                col_x1, col_x2 = st.columns(2)
-                                try:
-                                    x_sample_id_val = persona_data[f'x_sample_id_{i}'] if persona_data and f'x_sample_id_{i}' in persona_data.keys() else ""
-                                    x_sample_name_val = persona_data[f'x_sample_name_{i}'] if persona_data and f'x_sample_name_{i}' in persona_data.keys() else ""
-                                except:
-                                    x_sample_id_val = ""
-                                    x_sample_name_val = ""
-                                
-                                # セッションステートから値を取得（存在する場合）
-                                x_sample_id_val = st.session_state.get(f'parsed_x_sample_id_{i}_{selected_cast_id}', x_sample_id_val)
-                                x_sample_name_val = st.session_state.get(f'parsed_x_sample_name_{i}_{selected_cast_id}', x_sample_name_val)
-                                
-                                # parsed_の値をedit_キーに事前コピー（UIに反映させるため）
-                                # ⚠️ 重要: 条件なしで常に上書き（parsed_が更新された時に反映させる）
-                                edit_key_id = f"edit_x_sample_id_{i}_{selected_cast_id}"
-                                edit_key_name = f"edit_x_sample_name_{i}_{selected_cast_id}"
-                                
-                                if x_sample_id_val:
-                                    st.session_state[edit_key_id] = x_sample_id_val
-                                if x_sample_name_val:
-                                    st.session_state[edit_key_name] = x_sample_name_val
-                                
-                                # ⚠️ valueパラメータを削除（セッションステートで値を設定しているため、警告が出る）
-                                edit_x_sample_id = col_x1.text_input(f"XサンプルID #{i}", key=edit_key_id, help="アカウントIDから自動選択されます")
-                                edit_x_sample_name = col_x2.text_input(f"Xサンプルニックネーム #{i}", key=edit_key_name, help="ニックネームから自動選択されます")
-                                
-                                edit_x_samples_id.append(edit_x_sample_id)
-                                edit_x_samples_name.append(edit_x_sample_name)
-
+                    col3, col4 = st.columns(2)
+                    field_type = col3.selectbox("入力タイプ", ["text", "textarea"], format_func=lambda x: "テキスト入力" if x == "text" else "長文入力")
+                    is_required = col4.checkbox("必須項目")
                     
-                    with mission_edit_tab:
-                        st.markdown("### 📋 テキスト一括インポート")
-                        st.info("💡 アカウント運営指針のドキュメント全文を貼り付けると、該当項目を自動抽出してフォームに反映します")
-                        
-                        with st.expander("📝 テキスト一括インポートフォーム", expanded=False):
-                            bulk_text = st.text_area(
-                                "アカウント運営指針ドキュメントをコピペ",
-                                placeholder="## **アカウント運営指針**\n\nから始まるドキュメント全文を貼り付けてください",
-                                height=300,
-                                key=f"bulk_import_{selected_cast_id}"
-                            )
-                            
-                            if st.button("🔄 テキストから自動抽出して反映", key=f"parse_bulk_{selected_cast_id}"):
-                                if bulk_text:
-                                    try:
-                                        import re
-                                        extraction_results = []
-                                        
-                                        # ペルソナ設定から詳細ペルソナを抽出（CSV形式）
-                                        # IDは数字のみ（1, 2, 3...）または英数字（P001, C001...）に対応
-                                        persona_csv_match = re.search(r'ID,名前,年齢.*?\n([A-Za-z0-9]+,.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
-                                        if persona_csv_match:
-                                            csv_line = persona_csv_match.group(1).strip()
-                                            # CSVパース（引用符内のカンマを考慮）
-                                            import csv
-                                            from io import StringIO
-                                            reader = csv.reader(StringIO(csv_line))
-                                            parts = next(reader)
-                                            
-                                            if len(parts) >= 14:
-                                                # セッションステートに値を保存
-                                                st.session_state[f'parsed_age_{selected_cast_id}'] = parts[2].strip()
-                                                st.session_state[f'parsed_archetype_{selected_cast_id}'] = parts[3].strip()
-                                                st.session_state[f'parsed_occupation_{selected_cast_id}'] = parts[4].strip()
-                                                st.session_state[f'parsed_residence_{selected_cast_id}'] = parts[5].strip()
-                                                st.session_state[f'parsed_family_{selected_cast_id}'] = parts[6].strip()
-                                                st.session_state[f'parsed_quote_{selected_cast_id}'] = parts[7].strip()
-                                                st.session_state[f'parsed_x_purpose_{selected_cast_id}'] = parts[8].strip()
-                                                st.session_state[f'parsed_behavior_{selected_cast_id}'] = parts[9].strip()
-                                                st.session_state[f'parsed_topics_{selected_cast_id}'] = parts[10].strip()
-                                                st.session_state[f'parsed_follow_{selected_cast_id}'] = parts[11].strip() if len(parts) > 11 else ''
-                                                st.session_state[f'parsed_pain_{selected_cast_id}'] = parts[12].strip() if len(parts) > 12 else ''
-                                                st.session_state[f'parsed_brand_{selected_cast_id}'] = parts[13].strip() if len(parts) > 13 else ''
-                                                extraction_results.append("✅ ペルソナ情報を抽出")
-                                        
-                                        # XサンプルID・ニックネームを抽出（ランダムに3つ選択）
-                                        x_sample_csv_match = re.search(r'アカウントID,ニックネーム\s*\n(.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
-                                        if x_sample_csv_match:
-                                            csv_raw = x_sample_csv_match.group(1).strip()
-                                            csv_lines = [line.strip() for line in csv_raw.split('\n') if line.strip()]
-                                            
-                                            if csv_lines:
-                                                # ランダムに3つを選択（重複なし）
-                                                import random
-                                                import csv
-                                                from io import StringIO
-                                                
-                                                # 3つ以上あればランダムに3つ、少なければ全て
-                                                num_samples = min(3, len(csv_lines))
-                                                selected_lines = random.sample(csv_lines, num_samples)
-                                                
-                                                # デバッグ: 選択された行を表示
-                                                st.info(f"🔍 デバッグ: {num_samples}行を選択しました")
-                                                
-                                                # 各行をパースしてセッションステートに保存
-                                                saved_samples = []
-                                                for idx, selected_line in enumerate(selected_lines, 1):
-                                                    reader = csv.reader(StringIO(selected_line))
-                                                    parts = next(reader)
-                                                    
-                                                    if len(parts) >= 2:
-                                                        sample_id = parts[0].strip()
-                                                        sample_name = parts[1].strip()
-                                                        st.session_state[f'parsed_x_sample_id_{idx}_{selected_cast_id}'] = sample_id
-                                                        st.session_state[f'parsed_x_sample_name_{idx}_{selected_cast_id}'] = sample_name
-                                                        saved_samples.append(f"#{idx}: {sample_id} ({sample_name})")
-                                                        st.info(f"🔍 保存: parsed_x_sample_id_{idx}_{selected_cast_id} = {sample_id}")
-                                                        st.info(f"🔍 保存: parsed_x_sample_name_{idx}_{selected_cast_id} = {sample_name}")
-                                                
-                                                if saved_samples:
-                                                    extraction_results.append(f"✅ XサンプルID・ニックネームを抽出（{', '.join(saved_samples)}）")
-                                                else:
-                                                    st.warning("⚠️ XサンプルのパースでID/ニックネームを取得できませんでした")
-                                        
-                                        # サンプルプロフィールを抽出（複数パターンに対応）
-                                        # パターン1: **プロフィール:** (太字形式)
-                                        profile_match = re.search(r'\*\*プロフィール:\*\*\s*\n(.+?)(?=\n\n###|---|\Z)', bulk_text, re.DOTALL)
-                                        # パターン2: プロフィール:\n (通常形式)
-                                        if not profile_match:
-                                            profile_match = re.search(r'プロフィール:\s*\n(.+?)(?=\n\n|---|\Z)', bulk_text, re.DOTALL)
-                                        if profile_match:
-                                            st.session_state[f'parsed_profile_{selected_cast_id}'] = profile_match.group(1).strip()
-                                            extraction_results.append("✅ サンプルプロフィールを抽出")
-                                        
-                                        # 運営ミッション関連を抽出（複数パターンに対応）
-                                        # パターン1: 「運営ミッション:」形式
-                                        mission_match = re.search(r'###?\s*運営ミッション:\s*\n(.+?)(?=\n\n###?|---|\Z)', bulk_text, re.DOTALL)
-                                        # パターン2: 「### 私たちのミッション...」形式（太字なし）
-                                        if not mission_match:
-                                            mission_match = re.search(r'###\s*私たちのミッション.+?\n\n(.+?)(?=\n###\s*第|---|\Z)', bulk_text, re.DOTALL)
-                                        # パターン3: 「### **私たちのミッション...**」形式（太字あり）
-                                        if not mission_match:
-                                            mission_match = re.search(r'###?\s*\*\*私たちのミッション.+?\*\*\s*\n(.+?)(?=\n\n?\*\*プロフィール|\n###?\s*第|---|\Z)', bulk_text, re.DOTALL)
-                                        if mission_match:
-                                            st.session_state[f'parsed_mission_{selected_cast_id}'] = mission_match.group(1).strip()
-                                            extraction_results.append("✅ 運営ミッションを抽出")
-                                        
-                                        # ペルソナ設計意図: 「第1章」セクション（### または #### で始まる）
-                                        persona_design_match = re.search(r'###?\s*ペルソナ設計意図:\s*\n(.+?)(?=\n\n###?|---|\Z)', bulk_text, re.DOTALL)
-                                        if not persona_design_match:
-                                            # 新形式: ### 第1章: ... から次の ### 第2章 まで
-                                            persona_design_match = re.search(r'###\s+第1章[：:].+?\n\n(.+?)(?=\n###\s+第2章|---|\Z)', bulk_text, re.DOTALL)
-                                        if not persona_design_match:
-                                            # 旧形式: ### **第1章...
-                                            persona_design_match = re.search(r'###?\s*\*\*第1章.+?\*\*\s*\n(.+?)(?=\n###?\s*\*\*第|---|\Z)', bulk_text, re.DOTALL)
-                                        if persona_design_match:
-                                            st.session_state[f'parsed_persona_design_{selected_cast_id}'] = persona_design_match.group(1).strip()
-                                            extraction_results.append("✅ ペルソナ設計意図を抽出")
-                                        
-                                        # コンテンツ戦略: 「第2章」セクション
-                                        content_strategy_match = re.search(r'###?\s*コンテンツ戦略:\s*\n(.+?)(?=\n\n###?|---|\Z)', bulk_text, re.DOTALL)
-                                        if not content_strategy_match:
-                                            # 新形式: ### 第2章: ... から次の ### 第3章 まで
-                                            content_strategy_match = re.search(r'###\s+第2章[：:].+?\n\n(.+?)(?=\n###\s+第3章|---|\Z)', bulk_text, re.DOTALL)
-                                        if not content_strategy_match:
-                                            # 旧形式
-                                            content_strategy_match = re.search(r'###?\s*\*\*第2章.+?\*\*\s*\n(.+?)(?=\n###?\s*\*\*第|---|\Z)', bulk_text, re.DOTALL)
-                                        if content_strategy_match:
-                                            st.session_state[f'parsed_content_strategy_{selected_cast_id}'] = content_strategy_match.group(1).strip()
-                                            extraction_results.append("✅ コンテンツ戦略を抽出")
-                                        
-                                        # 最終目標: 「第3章」セクション
-                                        final_goal_match = re.search(r'###?\s*最終目標:\s*\n(.+?)(?=\n\n###?|---|\Z)', bulk_text, re.DOTALL)
-                                        if not final_goal_match:
-                                            # 新形式: ### 第3章: ... から文末まで
-                                            final_goal_match = re.search(r'###\s+第3章[：:].+?\n\n(.+?)(?=\n###\s+第[4-9]章|---|\Z)', bulk_text, re.DOTALL)
-                                        if not final_goal_match:
-                                            # 旧形式
-                                            final_goal_match = re.search(r'###?\s*\*\*第3章.+?\*\*\s*\n(.+?)(?=\n###?\s*\*\*|---|\Z)', bulk_text, re.DOTALL)
-                                        if final_goal_match:
-                                            st.session_state[f'parsed_final_goal_{selected_cast_id}'] = final_goal_match.group(1).strip()
-                                            extraction_results.append("✅ 最終目標を抽出")
-                                        
-                                        # サンプル投稿をCSV形式から抽出（ダブルクオート対応）
-                                        posts_csv_match = re.search(r'Category,Post[_\s]?Content\s*\n(.*?)(?=\n\n---|\n\n##|\Z)', bulk_text, re.DOTALL)
-                                        if posts_csv_match:
-                                            csv_raw = posts_csv_match.group(1).strip()
-                                            # 各行の末尾の空白を削除して正規化
-                                            csv_lines = [line.rstrip() for line in csv_raw.split('\n') if line.strip()]
-                                            csv_content = '\n'.join(csv_lines)
-                                            
-                                            # セッションステートに保存
-                                            session_key = f'parsed_posts_csv_{selected_cast_id}'
-                                            st.session_state[session_key] = csv_content
-                                            
-                                            extraction_results.append(f"✅ サンプル投稿を抽出 ({len(csv_lines)}件)")
-                                        
-                                        if extraction_results:
-                                            st.success("✅ テキストから情報を抽出しました！")
-                                            for result in extraction_results:
-                                                st.write(result)
-                                            st.info("💡 下のフォームで内容を確認し、サンプル投稿は「📥 一括インポート」ボタンでDBに登録してください")
-                                        else:
-                                            st.warning("⚠️ 抽出できる情報が見つかりませんでした。テキストの形式を確認してください。")
-                                        
-                                        st.rerun()
-                                        
-                                    except Exception as e:
-                                        st.error(f"❌ 抽出エラー: {str(e)}")
-                                        st.info("テキストの形式を確認してください")
-                                        import traceback
-                                        with st.expander("詳細エラー"):
-                                            st.code(traceback.format_exc())
-                                else:
-                                    st.warning("テキストを入力してください")
-                        
-                        st.markdown("---")
-                        st.markdown("### 📝 アカウント運営指針（個別編集）")
-                        
-                        # 抽出データがあれば反映（セッションステート優先）
-                        mission_val = st.session_state.get(f'parsed_mission_{selected_cast_id}', mission_data['mission'] if mission_data and mission_data['mission'] else '')
-                        persona_design_val = st.session_state.get(f'parsed_persona_design_{selected_cast_id}', mission_data['persona_design'] if mission_data and mission_data['persona_design'] else '')
-                        content_val = st.session_state.get(f'parsed_content_strategy_{selected_cast_id}', mission_data['content_strategy'] if mission_data and mission_data['content_strategy'] else '')
-                        goal_val = st.session_state.get(f'parsed_final_goal_{selected_cast_id}', mission_data['final_goal'] if mission_data and mission_data['final_goal'] else '')
-                        notes_val = mission_data['additional_notes'] if mission_data and mission_data['additional_notes'] else ''
-                        profile_val = st.session_state.get(f'parsed_profile_{selected_cast_id}', profile_data['profile_text'] if profile_data and profile_data['profile_text'] else '')
-                        
-                        edit_mission = st.text_area("運営ミッション", value=mission_val, key=f"edit_mission_{selected_cast_id}", height=100)
-                        edit_persona_design = st.text_area("ペルソナ設計意図", value=persona_design_val, key=f"edit_persona_design_{selected_cast_id}", height=100)
-                        edit_content = st.text_area("コンテンツ戦略", value=content_val, key=f"edit_content_{selected_cast_id}", height=100)
-                        edit_goal = st.text_area("最終目標", value=goal_val, key=f"edit_goal_{selected_cast_id}", height=100)
-                        edit_notes = st.text_area("補足事項", value=notes_val, key=f"edit_notes_{selected_cast_id}", height=100)
-                        
-                        st.markdown("### サンプルプロフィール")
-                        edit_profile = st.text_area("サンプルプロフィール", value=profile_val, key=f"edit_profile_{selected_cast_id}", height=100)
-                        
-                        # サンプル投稿一括インポート機能
-                        st.markdown("---")
-                        st.markdown("### 📊 サンプル投稿管理")
-                        
-                        parsed_posts_key = f'parsed_posts_csv_{selected_cast_id}'
-                        
-                        if parsed_posts_key in st.session_state:
-                            st.success("✅ サンプル投稿が抽出されています！")
-                            csv_content = st.session_state[parsed_posts_key]
-                            
-                            # プレビュー表示を改善
-                            lines = [l for l in csv_content.strip().split('\n') if l.strip()]
-                            st.info(f"📋 抽出件数: **{len(lines)}件** のサンプル投稿が見つかりました")
-                            
-                            # カテゴリごとに整理してプレビュー
-                            with st.expander("📝 抽出内容プレビュー", expanded=True):
-                                preview_data = []
-                                try:
-                                    import csv
-                                    from io import StringIO
-                                    csv_reader = csv.reader(StringIO(csv_content))
-                                    
-                                    for idx, row in enumerate(csv_reader):
-                                        if idx >= 10:  # 最初の10件のみ
-                                            break
-                                        if len(row) >= 2:
-                                            category = row[0].strip()
-                                            content = row[1].strip()
-                                            preview_data.append({
-                                                "カテゴリ": category, 
-                                                "投稿内容": content[:50] + "..." if len(content) > 50 else content
-                                            })
-                                except Exception as e:
-                                    st.error(f"プレビューエラー: {str(e)}")
-                                
-                                if preview_data:
-                                    import pandas as pd
-                                    df = pd.DataFrame(preview_data)
-                                    st.dataframe(df, use_container_width=True)
-                                    
-                                    if len(lines) > 10:
-                                        st.caption(f"...他 {len(lines) - 10}件")
-                                else:
-                                    st.warning("プレビューできるデータがありません")
-                            
-                            # 詳細CSV表示
-                            with st.expander("🔍 CSVデータ全文", expanded=False):
-                                st.text_area("抽出されたCSV", value=csv_content, height=200, disabled=True, key=f"preview_posts_{selected_cast_id}")
-                            
-                            col1, col2 = st.columns([2, 1])
-                            
-                            if col1.button("📥 サンプル投稿を一括インポート", type="primary", key=f"import_posts_{selected_cast_id}"):
-                                try:
-                                    import csv
-                                    from io import StringIO
-                                    
-                                    imported_count = 0
-                                    errors = []
-                                    
-                                    # 既存のサンプル投稿を削除
-                                    execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
-                                    
-                                    # CSVとして正しくパース（引用符内のカンマを考慮）
-                                    csv_reader = csv.reader(StringIO(csv_content))
-                                    
-                                    for idx, row in enumerate(csv_reader, 1):
-                                        try:
-                                            # 空行をスキップ
-                                            if not row or (len(row) == 1 and not row[0].strip()):
-                                                continue
-                                                
-                                            if len(row) >= 2:
-                                                category = row[0].strip()
-                                                content = row[1].strip()
-                                                
-                                                if category and content:
-                                                    execute_query(
-                                                        "INSERT INTO sample_posts (cast_id, category, post_content, sort_order) VALUES (?, ?, ?, ?)",
-                                                        (selected_cast_id, category, content, imported_count)
-                                                    )
-                                                    imported_count += 1
-                                                else:
-                                                    if category or content:  # 完全に空でない場合のみエラー記録
-                                                        errors.append(f"行{idx}: カテゴリまたは内容が空")
-                                            elif len(row) == 1 and row[0].strip():
-                                                # 1列のみでデータがある場合
-                                                errors.append(f"行{idx}: フォーマットエラー（列数不足） - {row[0][:30]}...")
-                                        except Exception as row_error:
-                                            errors.append(f"行{idx}: {str(row_error)}")
-                                    
-                                    # セッションステートをクリア
-                                    del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
-                                    
-                                    if errors and len(errors) < 10:  # エラーが少ない場合のみ表示
-                                        st.warning(f"⚠️ {len(errors)}件のエラーがありました")
-                                        with st.expander("エラー詳細"):
-                                            for err in errors:
-                                                st.text(err)
-                                    elif errors:
-                                        st.warning(f"⚠️ {len(errors)}件のエラーがありました（最初の10件のみ表示）")
-                                        with st.expander("エラー詳細"):
-                                            for err in errors[:10]:
-                                                st.text(err)
-                                    
-                                    if imported_count > 0:
-                                        st.success(f"✅ {imported_count}件のサンプル投稿をインポートしました！")
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ インポートできた投稿が0件です。CSVの形式を確認してください。")
-                                except Exception as e:
-                                    st.error(f"❌ インポートエラー: {str(e)}")
-                                    import traceback
-                                    with st.expander("エラー詳細"):
-                                        st.code(traceback.format_exc())
-                            
-                            if col2.button("❌ キャンセル", key=f"cancel_posts_{selected_cast_id}"):
-                                del st.session_state[f'parsed_posts_csv_{selected_cast_id}']
-                                st.info("インポートをキャンセルしました")
-                                st.rerun()
-                        else:
-                            st.info("💡 テキスト一括インポートでサンプル投稿を抽出すると、ここにインポートボタンが表示されます")
+                    placeholder = st.text_input("プレースホルダー", placeholder="例: ラーメン、寿司など")
                     
-                    with character_edit_tab:
-                        st.markdown("### キャラクター詳細設定")
-                        col1, col2 = st.columns(2)
-                        edit_birthday = col1.text_input("誕生日", value=cast_data['birthday'] or '', key=f"edit_birthday_{selected_cast_id}")
-                        edit_birthplace = col2.text_input("出身地", value=cast_data['birthplace'] or '', key=f"edit_birthplace_{selected_cast_id}")
-                        edit_appearance = st.text_area("外見", value=cast_data['appearance'] or '', key=f"edit_appearance_{selected_cast_id}")
-                        edit_interaction = st.text_area("顧客対応", value=cast_data['customer_interaction'] or '', key=f"edit_interaction_{selected_cast_id}")
-                        col1, col2 = st.columns(2)
-                        edit_hobby = col1.text_input("趣味", value=cast_data['hobby'] or '', key=f"edit_hobby_{selected_cast_id}")
-                        edit_holiday = col2.text_input("休日の過ごし方", value=cast_data['holiday_activity'] or '', key=f"edit_holiday_{selected_cast_id}")
-                        edit_reason = st.text_area("この仕事を選んだ理由", value=cast_data['reason_for_job'] or '', key=f"edit_reason_{selected_cast_id}")
-                    
-                    with xapi_edit_tab:
-                        st.markdown("### X API認証情報")
-                        st.info("キャスト専用のX APIキーを設定できます。")
-                        edit_api_key = st.text_input("API Key", value=x_creds['api_key'] if x_creds and x_creds['api_key'] else '', type="password", key=f"edit_api_key_{selected_cast_id}")
-                        edit_api_secret = st.text_input("API Secret", value=x_creds['api_secret'] if x_creds and x_creds['api_secret'] else '', type="password", key=f"edit_api_secret_{selected_cast_id}")
-                        edit_bearer = st.text_input("Bearer Token", value=x_creds['bearer_token'] if x_creds and x_creds['bearer_token'] else '', type="password", key=f"edit_bearer_{selected_cast_id}")
-                        edit_access = st.text_input("Access Token", value=x_creds['access_token'] if x_creds and x_creds['access_token'] else '', type="password", key=f"edit_access_{selected_cast_id}")
-                        edit_access_secret = st.text_input("Access Token Secret", value=x_creds['access_token_secret'] if x_creds and x_creds['access_token_secret'] else '', type="password", key=f"edit_access_secret_{selected_cast_id}")
-                        col1, col2 = st.columns(2)
-                        edit_username = col1.text_input("Twitterユーザー名", value=x_creds['twitter_username'] if x_creds and x_creds['twitter_username'] else '', key=f"edit_username_{selected_cast_id}")
-                        edit_user_id = col2.text_input("TwitterユーザーID", value=x_creds['twitter_user_id'] if x_creds and x_creds['twitter_user_id'] else '', key=f"edit_user_id_{selected_cast_id}")
-                    
-                    # --- サブタブ3-5: サンプル投稿 ---
-                    with sample_post_edit_tab:
-                        st.markdown("### 📝 サンプル投稿管理")
-                        st.info("このキャスト専用のサンプル投稿を追加・編集できます。")
-                        
-                        # 既存のサンプル投稿を取得
-                        sample_posts = execute_query(
-                            "SELECT id, category, post_content FROM sample_posts WHERE cast_id = ? ORDER BY sort_order, id",
-                            (selected_cast_id,), fetch="all"
-                        )
-                        
-                        if sample_posts:
-                            st.write(f"**登録済みサンプル投稿: {len(sample_posts)}件**")
-                            for idx, post in enumerate(sample_posts):
-                                with st.expander(f"📄 {post['category']} - {post['post_content'][:30]}..."):
-                                    st.text_area("投稿内容", value=post['post_content'], key=f"sample_view_{post['id']}", disabled=True, height=100)
-                                    if st.button("🗑️ 削除", key=f"delete_sample_{post['id']}"):
-                                        execute_query("DELETE FROM sample_posts WHERE id = ?", (post['id'],))
-                                        st.success("削除しました")
-                                        st.rerun()
-                        else:
-                            st.info("サンプル投稿がまだ登録されていません。")
-                        
-                        # 新規追加フォーム
-                        st.markdown("---")
-                        st.markdown("#### ➕ 新規サンプル投稿")
-                        new_category = st.text_input("カテゴリ", placeholder="例: 日常", key=f"new_sample_cat_{selected_cast_id}")
-                        new_content = st.text_area("投稿内容", placeholder="サンプル投稿の内容を入力", key=f"new_sample_content_{selected_cast_id}", height=150)
-                        
-                        if st.button("➕ サンプル投稿を追加", key=f"add_sample_{selected_cast_id}"):
-                            if new_category and new_content:
-                                max_order = execute_query(
-                                    "SELECT COALESCE(MAX(sort_order), 0) as max_order FROM sample_posts WHERE cast_id = ?",
-                                    (selected_cast_id,), fetch="one"
-                                )
+                    if st.form_submit_button("項目を追加", type="primary"):
+                        if new_field_name and new_display_name:
+                            # 英数字とアンダースコアのみ許可
+                            import re
+                            if re.match("^[a-zA-Z0-9_]+$", new_field_name):
+                                # カスタムフィールドテーブルに追加
+                                max_order = execute_query("SELECT MAX(sort_order) as max_order FROM custom_fields", fetch="one")
                                 next_order = (max_order['max_order'] or 0) + 1
-                                execute_query(
-                                    "INSERT INTO sample_posts (cast_id, category, post_content, sort_order) VALUES (?, ?, ?, ?)",
-                                    (selected_cast_id, new_category, new_content, next_order)
+                                
+                                result = execute_query(
+                                    "INSERT INTO custom_fields (field_name, display_name, field_type, placeholder, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                                    (new_field_name, new_display_name, field_type, placeholder, 1 if is_required else 0, next_order)
                                 )
-                                st.success("サンプル投稿を追加しました！")
-                                st.rerun()
+                                
+                                if result is not False:
+                                    # castsテーブルに列を追加
+                                    if add_column_to_casts_table(new_field_name):
+                                        st.success(f"項目「{new_display_name}」を追加しました！")
+                                        st.rerun()
                             else:
-                                st.error("カテゴリと投稿内容を入力してください")
-                    
-                    # ペルソナ詳細・運営指針・プロフィールの保存処理（全タブ共通）
-                    st.markdown("---")
-                    col_save, col_delete = st.columns([3, 1])
-                    if col_save.button("💾 ペルソナ情報を保存", key=f"save_persona_{selected_cast_id}", type="primary"):
-                        try:
-                            # persona_detailed更新または挿入
-                            if any([edit_archetype, edit_occupation, edit_residence, edit_family, edit_quote,
-                                   edit_x_purpose, edit_behavior, edit_topics, edit_follow, edit_pain, edit_brand,
-                                   *edit_x_samples_id, *edit_x_samples_name]):
-                                if persona_data:
-                                    execute_query(
-                                        """UPDATE persona_detailed SET archetype = ?, occupation = ?, residence = ?, 
-                                        family_structure = ?, symbolic_quote = ?, x_usage_purpose = ?, behavior_pattern = ?, 
-                                        interested_topics = ?, main_follow_targets = ?, platform_pain_points = ?, brand_relationship = ?,
-                                        x_sample_id_1 = ?, x_sample_name_1 = ?, x_sample_id_2 = ?, x_sample_name_2 = ?, 
-                                        x_sample_id_3 = ?, x_sample_name_3 = ? WHERE cast_id = ?""",
-                                        (edit_archetype, edit_occupation, edit_residence, edit_family, edit_quote,
-                                         edit_x_purpose, edit_behavior, edit_topics, edit_follow, edit_pain, edit_brand,
-                                         edit_x_samples_id[0], edit_x_samples_name[0], 
-                                         edit_x_samples_id[1], edit_x_samples_name[1],
-                                         edit_x_samples_id[2], edit_x_samples_name[2], selected_cast_id)
-                                    )
-                                else:
-                                    execute_query(
-                                        """INSERT INTO persona_detailed (cast_id, archetype, occupation, residence, family_structure, 
-                                        symbolic_quote, x_usage_purpose, behavior_pattern, interested_topics, main_follow_targets, platform_pain_points, 
-                                        brand_relationship, x_sample_id_1, x_sample_name_1, x_sample_id_2, x_sample_name_2, 
-                                        x_sample_id_3, x_sample_name_3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                        (selected_cast_id, edit_archetype, edit_occupation, edit_residence, edit_family,
-                                         edit_quote, edit_x_purpose, edit_behavior, edit_topics, edit_follow, edit_pain, edit_brand,
-                                         edit_x_samples_id[0], edit_x_samples_name[0],
-                                         edit_x_samples_id[1], edit_x_samples_name[1],
-                                         edit_x_samples_id[2], edit_x_samples_name[2])
-                                    )
-                            
-                            # account_mission更新または挿入
-                            if any([edit_mission, edit_persona_design, edit_content, edit_goal, edit_notes]):
-                                if mission_data:
-                                    execute_query(
-                                        """UPDATE account_mission SET mission = ?, persona_design = ?, content_strategy = ?, 
-                                        final_goal = ?, additional_notes = ? WHERE cast_id = ?""",
-                                        (edit_mission, edit_persona_design, edit_content, edit_goal, edit_notes, selected_cast_id)
-                                    )
-                                else:
-                                    execute_query(
-                                        """INSERT INTO account_mission (cast_id, mission, persona_design, content_strategy, 
-                                        final_goal, additional_notes) VALUES (?, ?, ?, ?, ?, ?)""",
-                                        (selected_cast_id, edit_mission, edit_persona_design, edit_content, edit_goal, edit_notes)
-                                    )
-                            
-                            # sample_profiles更新または挿入
-                            if edit_profile:
-                                if profile_data:
-                                    execute_query("UPDATE sample_profiles SET profile_text = ? WHERE cast_id = ?", (edit_profile, selected_cast_id))
-                                else:
-                                    execute_query("INSERT INTO sample_profiles (cast_id, profile_text) VALUES (?, ?)", (selected_cast_id, edit_profile))
-                            
-                            # X API認証情報更新
-                            if edit_api_key:
-                                save_cast_x_credentials(selected_cast_id, edit_api_key, edit_api_secret, edit_bearer,
-                                                      edit_access, edit_access_secret, edit_username, edit_user_id)
-                            
-                            # セッションステートのクリア（抽出データ）
-                            keys_to_clear = [
-                                f'parsed_age_{selected_cast_id}',
-                                f'parsed_archetype_{selected_cast_id}',
-                                f'parsed_occupation_{selected_cast_id}',
-                                f'parsed_residence_{selected_cast_id}',
-                                f'parsed_family_{selected_cast_id}',
-                                f'parsed_quote_{selected_cast_id}',
-                                f'parsed_x_purpose_{selected_cast_id}',
-                                f'parsed_behavior_{selected_cast_id}',
-                                f'parsed_topics_{selected_cast_id}',
-                                f'parsed_pain_{selected_cast_id}',
-                                f'parsed_brand_{selected_cast_id}',
-                                f'parsed_profile_{selected_cast_id}',
-                                f'parsed_posts_csv_{selected_cast_id}',
-                                f'parsed_x_sample_id_1_{selected_cast_id}',
-                                f'parsed_x_sample_name_1_{selected_cast_id}',
-                                f'parsed_x_sample_id_2_{selected_cast_id}',
-                                f'parsed_x_sample_name_2_{selected_cast_id}',
-                                f'parsed_x_sample_id_3_{selected_cast_id}',
-                                f'parsed_x_sample_name_3_{selected_cast_id}'
-                            ]
-                            for key in keys_to_clear:
-                                if key in st.session_state:
-                                    del st.session_state[key]
-                            
-                            st.success("✅ ペルソナ情報を保存しました！")
-                            st.balloons()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 保存エラー: {e}")
-                    
-                    if col_delete.button("🗑️ 削除", type="secondary", key=f"delete_{selected_cast_id}"):
-                        try:
-                            execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
-                            st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
-                            st.session_state.selected_cast_for_edit = None
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 削除エラー: {e}")
-        
-        # ==================== タブ2: キャスト一覧 ====================
-        with tab_list:
-            st.header("キャスト一覧")
-            casts = execute_query("SELECT c.id, c.name, c.nickname, c.age FROM casts c ORDER BY c.name", fetch="all")
-            
-            if not casts:
-                st.info("登録されているキャストがいません。")
-            else:
-                st.write(f"**登録キャスト数: {len(casts)}件**")
-                
-                for cast in casts:
-                    with st.container():
-                        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
-                        display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
-                        col1.markdown(f"### {display_name}")
-                        col2.text(f"年齢: {cast['age']}歳")
-                        
-                        persona_exists = execute_query("SELECT COUNT(*) as count FROM persona_detailed WHERE cast_id = ?", (cast['id'],), fetch="one")
-                        if persona_exists and persona_exists['count'] > 0:
-                            col3.success("✅ 詳細有")
+                                st.error("項目IDは英数字とアンダースコア(_)のみ使用できます。")
                         else:
-                            col3.info("➖ 詳細無")
-                        
-                        # 選択ボタン
-                        is_selected = st.session_state.selected_cast_for_edit == cast['id']
-                        if col4.button("✅ 選択中" if is_selected else "📝 選択", key=f"select_cast_{cast['id']}", disabled=is_selected):
-                            st.session_state.selected_cast_for_edit = cast['id']
-                            st.session_state.cast_import_message = ("success", f"✅ {display_name}を選択しました！編集タブに移動してください。")
+                            st.error("項目IDと表示名は必須です。")
+            
+            # 既存フィールドの表示と削除
+            st.subheader("登録済み項目一覧")
+            
+            # デフォルトフィールド
+            st.markdown("### 🔒 標準項目（削除不可）")
+            default_field_names = {
+                "name": "ユーザー名 (@username)", "nickname": "名前 (表示名)", "age": "年齢", "birthday": "誕生日",
+                "birthplace": "出身地", "appearance": "外見", "personality": "性格", "strength": "長所",
+                "weakness": "短所", "first_person": "一人称", "speech_style": "口調", "catchphrase": "口癖",
+                "customer_interaction": "接客スタイル", "occupation": "職業", "hobby": "趣味", "likes": "好きなもの",
+                "dislikes": "嫌いなもの", "holiday_activity": "休日の過ごし方", "dream": "夢", "reason_for_job": "仕事の理由",
+                "secret": "秘密", "allowed_categories": "許可カテゴリ"
+            }
+            
+            for field, display in default_field_names.items():
+                col1, col2, col3 = st.columns([3, 2, 1])
+                col1.text(f"📌 {display}")
+                col2.text(f"ID: {field}")
+                col3.text("🔒 標準")
+            
+            # カスタムフィールド
+            custom_fields = execute_query("SELECT * FROM custom_fields ORDER BY sort_order", fetch="all")
+            if custom_fields:
+                st.markdown("### ⚙️ カスタム項目")
+                for field in custom_fields:
+                    col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                    col1.text(f"🔧 {field['display_name']}")
+                    col2.text(f"ID: {field['field_name']}")
+                    col3.text("✅ 必須" if field['is_required'] else "⭕ 任意")
+                    
+                    if col4.button("🗑️ 削除", key=f"delete_field_{field['id']}"):
+                        # カスタムフィールドを削除
+                        execute_query("DELETE FROM custom_fields WHERE id = ?", (field['id'],))
+                        # テーブルから列を削除
+                        if remove_column_from_casts_table(field['field_name']):
+                            st.success(f"項目「{field['display_name']}」を削除しました！")
                             st.rerun()
-                        
-                        st.markdown("---")
+            else:
+                st.info("カスタム項目はまだ追加されていません。")
         
-        # ==================== タブ3: CSV管理 ====================
-        with tab_csv:
-            st.header("📥 CSV一括管理")
-            st.info("キャスト基本情報（38項目）とサンプル投稿（4項目）をCSVで一括管理できます。")
+        with csv_tab:
+            st.subheader("一括管理（CSV）")
             
-            csv_import_tab, csv_export_tab, csv_sample_posts_tab = st.tabs(["📥 インポート", "📤 エクスポート", "📝 サンプル投稿CSV"])
-            
-            # ===== インポートタブ =====
-            with csv_import_tab:
-                st.markdown("### キャスト基本情報のインポート")
-                st.info("""
-**CSVフォーマット:**
-- 必須項目: name, nickname, age
-- 詳細ペルソナ: archetype, occupation, residence等9項目
-- キャラクター設定: birthday, personality等13項目
-- 運営指針: mission, persona_design等5項目
-- サンプルプロフィール: sample_profile
-- X API情報: x_api_key, x_api_secret等7項目
-
-**合計: 38項目（nameのみ必須、他はオプション）**
-""")
-                
-                uploaded_file = st.file_uploader("キャスト基本情報CSV", type="csv", key="cast_master_csv")
-                
-                if uploaded_file:
-                    try:
-                        import pandas as pd
-                        df = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False).fillna("")
-                        
-                        st.write(f"**読み込んだデータ: {len(df)}件**")
-                        st.dataframe(df.head())
-                        
-                        if st.button("💾 インポート実行", type="primary"):
-                            success_count = 0
-                            error_count = 0
+            with st.expander("CSVでのインポート/エクスポートはこちら", expanded=False):
+                c1, c2 = st.columns(2)
+                with c1:
+                    uploaded_file = st.file_uploader("CSVファイルをアップロード（1行目:ID、2行目:項目説明、3行目～:データ）", type="csv")
+                    if uploaded_file is not None:
+                        try:
+                            # 動的フィールドを含めた全フィールドを取得
+                            all_fields = get_dynamic_persona_fields()
                             
-                            for idx, row in df.iterrows():
-                                try:
-                                    if not row.get('name'):
-                                        st.warning(f"行{idx+1}: nameが必須です")
-                                        error_count += 1
+                            # まず1行目（列名）を読み取る
+                            uploaded_file.seek(0)  # ファイルポインタをリセット
+                            header_df = pandas_lib.read_csv(uploaded_file, nrows=1, dtype=str)
+                            column_names = header_df.columns.tolist()
+                            
+                            # 3行目からデータを読み込み（skiprows=2で1行目と2行目をスキップ、1行目の列名を使用）
+                            uploaded_file.seek(0)  # ファイルポインタをリセット
+                            df = pandas_lib.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
+                            
+                            if 'id' in df.columns:
+                                df = df.drop(columns=['id'])
+                            
+                            # 不足している列を確認
+                            missing_columns = set(all_fields) - set(df.columns)
+                            if missing_columns:
+                                st.error(f"CSVの列が不足しています。不足している列: {', '.join(missing_columns)}")
+                                st.error(f"必要な列: {', '.join(all_fields)}")
+                            else:
+                                success_count = 0
+                                update_count = 0
+                                error_rows = []
+                                
+                                for index, row in df.iterrows():
+                                    cast_data = row.to_dict()
+                                    name = cast_data.get("name")
+                                    if not name:
+                                        error_rows.append(f"行{index+3}: キャスト名が空です")
                                         continue
                                     
-                                    # キャスト存在確認
-                                    existing_cast = execute_query("SELECT id FROM casts WHERE name = ?", (row['name'],), fetch="one")
-                                    
-                                    # キャスト基本情報
-                                    if existing_cast:
-                                        cast_id = existing_cast['id']
-                                        execute_query(
-                                            """UPDATE casts SET nickname = ?, age = ?, birthday = ?, personality = ?, 
-                                            strength = ?, weakness = ?, first_person = ?, speech_style = ?, catchphrase = ?, 
-                                            occupation = ?, hobby = ?, likes = ?, dislikes = ?, dream = ?, secret = ?
-                                            WHERE id = ?""",
-                                            (row.get('nickname', ''), row.get('age', ''), row.get('birthday', ''),
-                                             row.get('personality', ''), row.get('strength', ''), row.get('weakness', ''),
-                                             row.get('first_person', ''), row.get('speech_style', ''), row.get('catchphrase', ''),
-                                             row.get('occupation', ''), row.get('hobby', ''), row.get('likes', ''),
-                                             row.get('dislikes', ''), row.get('dream', ''), row.get('secret', ''), cast_id)
-                                        )
+                                    existing = execute_query("SELECT id FROM casts WHERE name = ?", (name,), fetch="one")
+                                    if existing:
+                                        set_clause = ", ".join([f"{key} = ?" for key in cast_data.keys() if key != 'name'])
+                                        params = tuple(val for key, val in cast_data.items() if key != 'name') + (name,)
+                                        result = execute_query(f"UPDATE casts SET {set_clause} WHERE name = ?", params)
+                                        if result is not False:
+                                            update_count += 1
                                     else:
-                                        execute_query(
-                                            """INSERT INTO casts (name, nickname, age, birthday, personality, strength, weakness, 
-                                            first_person, speech_style, catchphrase, occupation, hobby, likes, dislikes, dream, secret)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                            (row['name'], row.get('nickname', ''), row.get('age', ''), row.get('birthday', ''),
-                                             row.get('personality', ''), row.get('strength', ''), row.get('weakness', ''),
-                                             row.get('first_person', ''), row.get('speech_style', ''), row.get('catchphrase', ''),
-                                             row.get('occupation', ''), row.get('hobby', ''), row.get('likes', ''),
-                                             row.get('dislikes', ''), row.get('dream', ''), row.get('secret', ''))
-                                        )
-                                        cast_id = execute_query("SELECT id FROM casts WHERE name = ?", (row['name'],), fetch="one")['id']
-                                    
-                                    # 詳細ペルソナ
-                                    if any([row.get('archetype'), row.get('residence'), row.get('family_structure')]):
-                                        persona_exists = execute_query("SELECT COUNT(*) as count FROM persona_detailed WHERE cast_id = ?", (cast_id,), fetch="one")
-                                        if persona_exists['count'] > 0:
-                                            execute_query(
-                                                """UPDATE persona_detailed SET archetype = ?, occupation = ?, residence = ?, 
-                                                family_structure = ?, symbolic_quote = ?, x_usage_purpose = ?, behavior_pattern = ?, 
-                                                interested_topics = ?, main_follow_targets = ?, platform_pain_points = ?, brand_relationship = ?, 
-                                                updated_at = CURRENT_TIMESTAMP WHERE cast_id = ?""",
-                                                (row.get('archetype', ''), row.get('occupation', ''), row.get('residence', ''),
-                                                 row.get('family_structure', ''), row.get('symbolic_quote', ''), row.get('x_usage_purpose', ''),
-                                                 row.get('behavior_pattern', ''), row.get('interested_topics', ''), row.get('main_follow_targets', ''),
-                                                 row.get('platform_pain_points', ''), row.get('brand_relationship', ''), cast_id)
-                                            )
-                                        else:
-                                            execute_query(
-                                                """INSERT INTO persona_detailed (cast_id, archetype, occupation, residence, family_structure, 
-                                                symbolic_quote, x_usage_purpose, behavior_pattern, interested_topics, main_follow_targets, platform_pain_points, brand_relationship)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                                (cast_id, row.get('archetype', ''), row.get('occupation', ''), row.get('residence', ''),
-                                                 row.get('family_structure', ''), row.get('symbolic_quote', ''), row.get('x_usage_purpose', ''),
-                                                 row.get('behavior_pattern', ''), row.get('interested_topics', ''), row.get('main_follow_targets', ''),
-                                                 row.get('platform_pain_points', ''), row.get('brand_relationship', ''))
-                                            )
-                                    
-                                    # 運営指針
-                                    if any([row.get('mission'), row.get('persona_design')]):
-                                        mission_exists = execute_query("SELECT COUNT(*) as count FROM account_mission WHERE cast_id = ?", (cast_id,), fetch="one")
-                                        if mission_exists['count'] > 0:
-                                            execute_query(
-                                                """UPDATE account_mission SET mission = ?, persona_design = ?, content_strategy = ?, 
-                                                final_goal = ?, additional_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE cast_id = ?""",
-                                                (row.get('mission', ''), row.get('persona_design', ''), row.get('content_strategy', ''),
-                                                 row.get('final_goal', ''), row.get('additional_notes', ''), cast_id)
-                                            )
-                                        else:
-                                            execute_query(
-                                                """INSERT INTO account_mission (cast_id, mission, persona_design, content_strategy, final_goal, additional_notes)
-                                                VALUES (?, ?, ?, ?, ?, ?)""",
-                                                (cast_id, row.get('mission', ''), row.get('persona_design', ''),
-                                                 row.get('content_strategy', ''), row.get('final_goal', ''), row.get('additional_notes', ''))
-                                            )
-                                    
-                                    # サンプルプロフィール
-                                    if row.get('sample_profile'):
-                                        profile_exists = execute_query("SELECT COUNT(*) as count FROM sample_profiles WHERE cast_id = ?", (cast_id,), fetch="one")
-                                        if profile_exists['count'] > 0:
-                                            execute_query("UPDATE sample_profiles SET profile_text = ?, updated_at = CURRENT_TIMESTAMP WHERE cast_id = ?",
-                                                        (row['sample_profile'], cast_id))
-                                        else:
-                                            execute_query("INSERT INTO sample_profiles (cast_id, profile_text) VALUES (?, ?)",
-                                                        (cast_id, row['sample_profile']))
-                                    
-                                    # X API認証情報
-                                    if row.get('x_api_key'):
-                                        save_cast_x_credentials(cast_id, row.get('x_api_key', ''), row.get('x_api_secret', ''),
-                                                              row.get('x_bearer_token', ''), row.get('x_access_token', ''),
-                                                              row.get('x_access_token_secret', ''), row.get('x_twitter_username'),
-                                                              row.get('x_twitter_user_id'))
-                                    
-                                    success_count += 1
-                                except Exception as e:
-                                    st.error(f"行{idx+1}: {e}")
-                                    error_count += 1
-                            
-                            st.success(f"✅ インポート完了: 成功 {success_count}件、エラー {error_count}件")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"CSVの読み込みエラー: {e}")
+                                        columns = ', '.join(cast_data.keys())
+                                        placeholders = ', '.join(['?'] * len(cast_data))
+                                        values = tuple(cast_data.values())
+                                        result = execute_query(f"INSERT INTO casts ({columns}) VALUES ({placeholders})", values)
+                                        if result is not False:
+                                            success_count += 1
+                                
+                                # 結果の表示
+                                total_processed = success_count + update_count
+                                if total_processed > 0:
+                                    if error_rows:
+                                        message = f"{success_count}件の新規キャストを追加、{update_count}件のキャストを更新しました。{len(error_rows)}件のエラーがありました。"
+                                        st.warning(message)
+                                        st.write("**エラー詳細:**")
+                                        for error in error_rows[:5]:  # 最初の5件のエラーを表示
+                                            st.write(f"• {error}")
+                                    else:
+                                        message = f"{success_count}件の新規キャストを追加、{update_count}件のキャストを更新しました。"
+                                        st.success(message)
+                                    st.info("「一覧表示」タブで結果を確認できます。")
+                                elif error_rows:
+                                    # 処理されたデータがない場合はエラーメッセージのみ表示
+                                    st.error(f"インポートできませんでした。{len(error_rows)}件のエラーがあります。")
+                                    for error in error_rows[:3]:  # 最初の3件のエラーのみ表示
+                                        st.write(f"• {error}")
+                                else:
+                                    st.info("処理するデータがありませんでした。")
+                                        
+                        except Exception as e: 
+                            st.error(f"CSVの処理中にエラーが発生しました: {e}")
+                with c2:
+                    all_casts_data = execute_query("SELECT * FROM casts", fetch="all")
+                    if all_casts_data:
+                        df = pandas_lib.DataFrame([dict(row) for row in all_casts_data])
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button("既存キャストをCSVでエクスポート", data=csv, file_name='casts_export.csv', mime='text/csv', use_container_width=True)
+        
+        with individual_tab:
+            st.header("キャストの個別管理")
+            tab_create, tab_edit, tab_list = st.tabs(["新しいキャストの作成", "既存キャストの編集・削除", "一覧表示"])
+        
+            cat_rows = execute_query("SELECT name FROM situation_categories ORDER BY name", fetch="all")
+            category_options = [row['name'] for row in cat_rows] if cat_rows else []
             
-            # ===== エクスポートタブ =====
-            with csv_export_tab:
-                st.markdown("### キャスト基本情報のエクスポート")
-                
-                if st.button("📤 CSVをダウンロード"):
-                    try:
-                        import pandas as pd
-                        import io
-                        
-                        casts = execute_query("SELECT * FROM casts", fetch="all")
-                        export_data = []
-                        
-                        for cast in casts:
-                            persona = execute_query("SELECT * FROM persona_detailed WHERE cast_id = ?", (cast['id'],), fetch="one")
-                            mission = execute_query("SELECT * FROM account_mission WHERE cast_id = ?", (cast['id'],), fetch="one")
-                            profile = execute_query("SELECT profile_text FROM sample_profiles WHERE cast_id = ?", (cast['id'],), fetch="one")
-                            x_creds = get_cast_x_credentials(cast['id'])
-                            
-                            row_data = {
-                                'name': cast['name'],
-                                'nickname': cast['nickname'] or '',
-                                'age': cast['age'] or '',
-                                'birthday': cast['birthday'] or '',
-                                'personality': cast['personality'] or '',
-                                'strength': cast['strength'] or '',
-                                'weakness': cast['weakness'] or '',
-                                'first_person': cast['first_person'] or '',
-                                'speech_style': cast['speech_style'] or '',
-                                'catchphrase': cast['catchphrase'] or '',
-                                'occupation': cast['occupation'] or '',
-                                'hobby': cast['hobby'] or '',
-                                'likes': cast['likes'] or '',
-                                'dislikes': cast['dislikes'] or '',
-                                'dream': cast['dream'] or '',
-                                'secret': cast['secret'] or '',
-                                'archetype': persona['archetype'] if persona else '',
-                                'residence': persona['residence'] if persona else '',
-                                'family_structure': persona['family_structure'] if persona else '',
-                                'symbolic_quote': persona['symbolic_quote'] if persona else '',
-                                'x_usage_purpose': persona['x_usage_purpose'] if persona else '',
-                                'behavior_pattern': persona['behavior_pattern'] if persona else '',
-                                'interested_topics': persona['interested_topics'] if persona else '',
-                                'platform_pain_points': persona['platform_pain_points'] if persona else '',
-                                'brand_relationship': persona['brand_relationship'] if persona else '',
-                                'mission': mission['mission'] if mission else '',
-                                'persona_design': mission['persona_design'] if mission else '',
-                                'content_strategy': mission['content_strategy'] if mission else '',
-                                'final_goal': mission['final_goal'] if mission else '',
-                                'additional_notes': mission['additional_notes'] if mission else '',
-                                'sample_profile': profile['profile_text'] if profile else '',
-                                'x_api_key': x_creds['api_key'] if x_creds else '',
-                                'x_api_secret': x_creds['api_secret'] if x_creds else '',
-                                'x_bearer_token': x_creds['bearer_token'] if x_creds else '',
-                                'x_access_token': x_creds['access_token'] if x_creds else '',
-                                'x_access_token_secret': x_creds['access_token_secret'] if x_creds else '',
-                                'x_twitter_username': x_creds['twitter_username'] if x_creds else '',
-                                'x_twitter_user_id': x_creds['twitter_user_id'] if x_creds else ''
-                            }
-                            export_data.append(row_data)
-                        
-                        df = pd.DataFrame(export_data)
-                        csv_buffer = io.StringIO()
-                        df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-                        
-                        st.download_button(
-                            label="💾 cast_master.csv をダウンロード",
-                            data=csv_buffer.getvalue(),
-                            file_name="cast_master.csv",
-                            mime="text/csv"
-                        )
-                        st.success(f"✅ {len(export_data)}件のキャストをエクスポートしました")
-                    except Exception as e:
-                        st.error(f"エクスポートエラー: {e}")
+            group_rows = execute_query("SELECT id, name FROM groups ORDER BY name", fetch="all")
+            group_options = {row['name']: row['id'] for row in group_rows} if group_rows else {}
             
-            # ===== サンプル投稿CSVタブ =====
-            with csv_sample_posts_tab:
-                st.markdown("### サンプル投稿のCSV管理")
-                st.info("""
-**CSVフォーマット:**
-- username: キャスト名（紐付け用）
-- category: カテゴリ名
-- post_content: 投稿内容
-- sort_order: 表示順（オプション）
-""")
-                
-                # インポート
-                st.markdown("#### 📥 インポート")
-                uploaded_posts = st.file_uploader("サンプル投稿CSV", type="csv", key="sample_posts_csv")
-                
-                if uploaded_posts:
-                    try:
-                        import pandas as pd
-                        df = pd.read_csv(uploaded_posts, dtype=str, keep_default_na=False).fillna("")
+            # カスタムフィールドを取得
+            custom_fields = execute_query("SELECT * FROM custom_fields ORDER BY sort_order", fetch="all")
+
+            with tab_create:
+                with st.form(key="new_cast_form"):
+                    tab_names = ["1. 基本情報", "2. 性格・話し方", "3. 背景ストーリー", "4. 許可カテゴリ", "5. 所属グループ"]
+                    if custom_fields:
+                        tab_names.append("6. カスタム項目")
+                    form_tabs = st.tabs(tab_names)
+                    with form_tabs[0]:
+                        c1, c2 = st.columns(2)
+                        # プレースホルダーを設定から取得
+                        cast_name_ph = get_app_setting("cast_name_placeholder", "@shiori_hoshino")
+                        cast_nickname_ph = get_app_setting("cast_nickname_placeholder", "星野 詩織")
+                        cast_age_ph = get_app_setting("cast_age_placeholder", "21歳")
+                        cast_birthday_ph = get_app_setting("cast_birthday_placeholder", "10月26日")
+                        cast_birthplace_ph = get_app_setting("cast_birthplace_placeholder", "神奈川県")
+                        cast_appearance_ph = get_app_setting("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気。古着のワンピースをよく着ている。")
                         
-                        st.write(f"**読み込んだデータ: {len(df)}件**")
-                        st.dataframe(df.head())
+                        new_name = c1.text_input("ユーザー名*", placeholder=cast_name_ph); new_nickname = c2.text_input("名前（表示名）", placeholder=cast_nickname_ph)
+                        new_age = c1.text_input("年齢", placeholder=cast_age_ph); new_birthday = c2.text_input("誕生日", placeholder=cast_birthday_ph)
+                        new_birthplace = c1.text_input("出身地", placeholder=cast_birthplace_ph); new_appearance = st.text_area("外見の特徴", placeholder=cast_appearance_ph)
+                    with form_tabs[1]:
+                        c1, c2, c3 = st.columns(3)
+                        # プレースホルダーを設定から取得
+                        cast_personality_ph = get_app_setting("cast_personality_placeholder", "物静かで穏やかな聞き上手")
+                        cast_strength_ph = get_app_setting("cast_strength_placeholder", "人の話に深く共感できる")
+                        cast_weakness_ph = get_app_setting("cast_weakness_placeholder", "少し人見知り")
+                        cast_first_person_ph = get_app_setting("cast_first_person_placeholder", "私")
+                        cast_speech_style_ph = get_app_setting("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い")
+                        cast_catchphrase_ph = get_app_setting("cast_catchphrase_placeholder", "「なんだか、素敵ですね」")
                         
-                        if st.button("💾 サンプル投稿をインポート", type="primary", key="import_sample_posts"):
-                            success_count = 0
-                            error_count = 0
-                            
-                            for idx, row in df.iterrows():
-                                try:
-                                    if not row.get('username') or not row.get('post_content'):
-                                        error_count += 1
-                                        continue
-                                    
-                                    cast = execute_query("SELECT id FROM casts WHERE name = ?", (row['username'],), fetch="one")
-                                    if not cast:
-                                        st.warning(f"行{idx+1}: キャスト '{row['username']}' が見つかりません")
-                                        error_count += 1
-                                        continue
-                                    
-                                    execute_query(
-                                        """INSERT INTO sample_posts (cast_id, category, post_content, sort_order)
-                                        VALUES (?, ?, ?, ?)""",
-                                        (cast['id'], row.get('category', ''), row['post_content'],
-                                         int(row.get('sort_order', 0)) if row.get('sort_order') else 0)
+                        new_personality = c1.text_input("性格（一言で）", placeholder=cast_personality_ph); new_strength = c2.text_input("長所", placeholder=cast_strength_ph)
+                        new_weakness = c3.text_input("短所", placeholder=cast_weakness_ph); new_first_person = c1.text_input("一人称", placeholder=cast_first_person_ph)
+                        new_speech_style = c2.text_area("口調・語尾", placeholder=cast_speech_style_ph); new_catchphrase = c3.text_input("口癖", placeholder=cast_catchphrase_ph)
+                        cast_customer_interaction_ph = get_app_setting("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く")
+                        new_customer_interaction = st.text_area("お客様への接し方", placeholder=cast_customer_interaction_ph)
+                    with form_tabs[2]:
+                        c1, c2 = st.columns(2)
+                        # プレースホルダーを設定から取得
+                        cast_occupation_ph = get_app_setting("cast_occupation_placeholder", "文学部の女子大生")
+                        cast_hobby_ph = get_app_setting("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り")
+                        
+                        new_occupation = c1.text_input("職業／学業", placeholder=cast_occupation_ph); new_hobby = c2.text_area("趣味や特技", placeholder=cast_hobby_ph)
+                        # プレースホルダーを設定から取得
+                        cast_likes_ph = get_app_setting("cast_likes_placeholder", "雨の日の匂い、万年筆のインク")
+                        cast_dislikes_ph = get_app_setting("cast_dislikes_placeholder", "大きな音、人混み")
+                        cast_holiday_activity_ph = get_app_setting("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る")
+                        cast_dream_ph = get_app_setting("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと")
+                        cast_reason_for_job_ph = get_app_setting("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから")
+                        cast_secret_ph = get_app_setting("cast_secret_placeholder", "実は、大のSF小説好き")
+                        
+                        new_likes = c1.text_area("好きなもの", placeholder=cast_likes_ph); new_dislikes = c2.text_area("嫌いなもの", placeholder=cast_dislikes_ph)
+                        new_holiday_activity = st.text_area("休日の過ごし方", placeholder=cast_holiday_activity_ph); new_dream = st.text_area("将来の夢", placeholder=cast_dream_ph)
+                        new_reason_for_job = st.text_area("なぜこの仕事をしているのか", placeholder=cast_reason_for_job_ph); new_secret = st.text_area("ちょっとした秘密", placeholder=cast_secret_ph)
+                    with form_tabs[3]:
+                        st.info("このキャストが投稿を生成する際に使用できるシチュエーションのカテゴリを選択してください。")
+                        if not category_options:
+                            st.warning("カテゴリが登録されていません。「カテゴリ管理」で先にカテゴリを作成してください。")
+                            new_allowed_categories = []
+                        else:
+                            new_allowed_categories = st.multiselect("許可するカテゴリ", category_options, key="new_cat_select")
+                    with form_tabs[4]:
+                        st.info("このキャストが所属するグループを選択してください。グループの共通設定がペルソナに追加されます。")
+                        new_groups = st.multiselect("所属するグループ", list(group_options.keys()), key="new_group_select")
+                
+                    # カスタムフィールドのタブを追加
+                    if custom_fields:
+                        with form_tabs[5]:  # 6番目のタブとして追加
+                            st.info("追加されたカスタム項目を入力してください。")
+                            for field in custom_fields:
+                                if field['field_type'] == 'textarea':
+                                    locals()[f"new_{field['field_name']}"] = st.text_area(
+                                        field['display_name'] + (" *" if field['is_required'] else ""),
+                                        placeholder=field['placeholder']
                                     )
-                                    success_count += 1
-                                except Exception as e:
-                                    st.error(f"行{idx+1}: {e}")
-                                    error_count += 1
-                            
-                            st.success(f"✅ インポート完了: 成功 {success_count}件、エラー {error_count}件")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"CSVの読み込みエラー: {e}")
+                                else:
+                                    locals()[f"new_{field['field_name']}"] = st.text_input(
+                                        field['display_name'] + (" *" if field['is_required'] else ""),
+                                        placeholder=field['placeholder']
+                                    )
+                    
+                    if st.form_submit_button(label="新しいキャストを作成", type="primary"):
+                        if new_name:
+                            # 動的フィールドを含む全フィールドでcast_dataを作成
+                            all_fields = get_dynamic_persona_fields()
+                            form_data = locals(); cast_data = {field: form_data.get(f"new_{field}", "") for field in all_fields}
+                            cast_data['allowed_categories'] = ",".join(new_allowed_categories)
+                            columns = ', '.join(cast_data.keys()); placeholders = ', '.join(['?'] * len(cast_data)); values = tuple(cast_data.values())
+                            new_cast_id = execute_query(f"INSERT INTO casts ({columns}) VALUES ({placeholders})", values)
+                            if new_cast_id:
+                                for group_name in new_groups:
+                                    group_id = group_options.get(group_name)
+                                    execute_query("INSERT INTO cast_groups (cast_id, group_id) VALUES (?, ?)", (new_cast_id, group_id))
+                                st.session_state.cast_import_message = ("success", f"新しいキャスト「{new_name}」を作成しました！")
+                                st.rerun()
+                        else: st.error("キャスト名は必須項目です。")
+
+        with tab_edit:
+            casts = execute_query("SELECT id, name, nickname FROM casts ORDER BY name", fetch="all")
+            if not casts:
+                 st.info("編集できるキャストがまだいません。")
+            else:
+                # キャスト表示名を「name（nickname）」形式で作成
+                cast_display_options = []
+                cast_name_mapping = {}
+                for cast in casts:
+                    display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+                    cast_display_options.append(display_name)
+                    cast_name_mapping[display_name] = cast['name']
                 
-                # エクスポート
-                st.markdown("#### 📤 エクスポート")
-                if st.button("📤 サンプル投稿CSVをダウンロード", key="export_sample_posts"):
-                    try:
-                        import pandas as pd
-                        import io
+                selected_cast_display_edit = st.selectbox("編集するキャストを選択", cast_display_options, key="edit_cast_select")
+                selected_cast_name_edit = cast_name_mapping[selected_cast_display_edit]
+                if selected_cast_name_edit:
+                    cast_id_to_edit = next((c['id'] for c in casts if c['name'] == selected_cast_name_edit), None)
+                    cast_data_to_edit_row = execute_query(f"SELECT * FROM casts WHERE id = ?", (cast_id_to_edit,), fetch="one")
+                    cast_data_to_edit = dict(cast_data_to_edit_row) if cast_data_to_edit_row else None
+                    if cast_data_to_edit:
+                        with st.form(key="edit_cast_form"):
+                            edit_tab_names = ["基本情報", "性格・話し方", "背景ストーリー", "許可カテゴリ", "所属グループ"]
+                            if custom_fields:
+                                edit_tab_names.append("カスタム項目")
+                            edit_tabs = st.tabs(edit_tab_names)
+                            t1, t2, t3, t4, t5 = edit_tabs[:5]
+                            with t1:
+                                c1, c2 = st.columns(2)
+                                # プレースホルダーを設定から取得
+                                cast_name_ph = get_app_setting("cast_name_placeholder", "星野 詩織")
+                                cast_nickname_ph = get_app_setting("cast_nickname_placeholder", "しおりん")
+                                cast_age_ph = get_app_setting("cast_age_placeholder", "21歳")
+                                cast_appearance_ph = get_app_setting("cast_appearance_placeholder", "黒髪ロングで物静かな雰囲気")
+                                cast_birthday_ph = get_app_setting("cast_birthday_placeholder", "10月26日")
+                                cast_birthplace_ph = get_app_setting("cast_birthplace_placeholder", "神奈川県")
+                                
+                                edit_name = c1.text_input("ユーザー名*", value=cast_data_to_edit.get('name', ''), placeholder=cast_name_ph)
+                                edit_nickname = c2.text_input("名前（表示名）", value=cast_data_to_edit.get('nickname', ''), placeholder=cast_nickname_ph); edit_age = c1.text_input("年齢", value=cast_data_to_edit.get('age', ''), placeholder=cast_age_ph)
+                                edit_appearance = st.text_area("外見の特徴", value=cast_data_to_edit.get('appearance', ''), placeholder=cast_appearance_ph); edit_birthday = c1.text_input("誕生日", value=cast_data_to_edit.get('birthday', ''), placeholder=cast_birthday_ph)
+                                edit_birthplace = c2.text_input("出身地", value=cast_data_to_edit.get('birthplace', ''), placeholder=cast_birthplace_ph)
+                            with t2:
+                                c1, c2, c3 = st.columns(3)
+                                # プレースホルダーを設定から取得
+                                cast_personality_ph = get_app_setting("cast_personality_placeholder", "物静かで穏やかな聞き上手")
+                                cast_strength_ph = get_app_setting("cast_strength_placeholder", "人の話に深く共感できる")
+                                cast_weakness_ph = get_app_setting("cast_weakness_placeholder", "少し人見知り")
+                                cast_first_person_ph = get_app_setting("cast_first_person_placeholder", "私")
+                                cast_speech_style_ph = get_app_setting("cast_speech_style_placeholder", "です・ます調の丁寧な言葉遣い")
+                                cast_catchphrase_ph = get_app_setting("cast_catchphrase_placeholder", "「なんだか、素敵ですね」")
+                                cast_customer_interaction_ph = get_app_setting("cast_customer_interaction_placeholder", "お客様の心に寄り添うように、静かに話を聞く")
+                                
+                                edit_personality = c1.text_input("性格（一言で）", value=cast_data_to_edit.get('personality', ''), placeholder=cast_personality_ph); edit_strength = c2.text_input("長所", value=cast_data_to_edit.get('strength', ''), placeholder=cast_strength_ph)
+                                edit_weakness = c3.text_input("短所", value=cast_data_to_edit.get('weakness', ''), placeholder=cast_weakness_ph); edit_first_person = c1.text_input("一人称", value=cast_data_to_edit.get('first_person', ''), placeholder=cast_first_person_ph)
+                                edit_speech_style = c2.text_area("口調・語尾", value=cast_data_to_edit.get('speech_style', ''), placeholder=cast_speech_style_ph); edit_catchphrase = c3.text_input("口癖", value=cast_data_to_edit.get('catchphrase', ''), placeholder=cast_catchphrase_ph)
+                                edit_customer_interaction = st.text_area("お客様への接し方", value=cast_data_to_edit.get('customer_interaction', ''), placeholder=cast_customer_interaction_ph)
+                            with t3:
+                                c1, c2 = st.columns(2)
+                                # プレースホルダーを設定から取得
+                                cast_occupation_ph = get_app_setting("cast_occupation_placeholder", "文学部の女子大生")
+                                cast_hobby_ph = get_app_setting("cast_hobby_placeholder", "読書、フィルムカメラ、古い喫茶店巡り")
+                                cast_likes_ph = get_app_setting("cast_likes_placeholder", "雨の日の匂い、万年筆のインク")
+                                cast_dislikes_ph = get_app_setting("cast_dislikes_placeholder", "大きな音、人混み")
+                                cast_holiday_activity_ph = get_app_setting("cast_holiday_activity_placeholder", "一日中家で本を読んでいるか、目的もなく電車に乗る")
+                                cast_dream_ph = get_app_setting("cast_dream_placeholder", "自分の言葉で、誰かの心を動かす物語を紡ぐこと")
+                                cast_reason_for_job_ph = get_app_setting("cast_reason_for_job_placeholder", "様々な人の物語に触れたいから")
+                                cast_secret_ph = get_app_setting("cast_secret_placeholder", "実は、大のSF小説好き")
+                                
+                                edit_occupation = c1.text_input("職業／学業", value=cast_data_to_edit.get('occupation', ''), placeholder=cast_occupation_ph); edit_hobby = c2.text_area("趣味や特技", value=cast_data_to_edit.get('hobby', ''), placeholder=cast_hobby_ph)
+                                edit_likes = c1.text_area("好きなもの", value=cast_data_to_edit.get('likes', ''), placeholder=cast_likes_ph); edit_dislikes = c2.text_area("嫌いなもの", value=cast_data_to_edit.get('dislikes', ''), placeholder=cast_dislikes_ph)
+                                edit_holiday_activity = st.text_area("休日の過ごし方", value=cast_data_to_edit.get('holiday_activity', ''), placeholder=cast_holiday_activity_ph); edit_dream = st.text_area("将来の夢", value=cast_data_to_edit.get('dream', ''), placeholder=cast_dream_ph)
+                                edit_reason_for_job = st.text_area("なぜこの仕事をしているのか", value=cast_data_to_edit.get('reason_for_job', ''), placeholder=cast_reason_for_job_ph); edit_secret = st.text_area("ちょっとした秘密", value=cast_data_to_edit.get('secret', ''), placeholder=cast_secret_ph)
+                            with t4:
+                                allowed_categories_str = cast_data_to_edit.get('allowed_categories')
+                                current_allowed = allowed_categories_str.split(',') if allowed_categories_str else []
+                                
+                                if not category_options:
+                                    st.warning("カテゴリが登録されていません。「カテゴリ管理」で先にカテゴリを作成してください。")
+                                    edit_allowed_categories = []
+                                else:
+                                    # 現在のカテゴリオプションに存在するもののみをデフォルト値として使用
+                                    valid_current_allowed = [cat for cat in current_allowed if cat in category_options]
+                                    if current_allowed and not valid_current_allowed:
+                                        st.warning(f"以前設定されていたカテゴリ「{', '.join(current_allowed)}」が削除されています。新しくカテゴリを選択してください。")
+                                    edit_allowed_categories = st.multiselect("許可するカテゴリ", category_options, default=valid_current_allowed)
+                            with t5:
+                                current_group_rows = execute_query("SELECT g.name FROM groups g JOIN cast_groups cg ON g.id = cg.group_id WHERE cg.cast_id = ?", (cast_id_to_edit,), fetch="all")
+                                current_groups = [row['name'] for row in current_group_rows] if current_group_rows else []
+                                edit_groups = st.multiselect("所属するグループ", list(group_options.keys()), default=current_groups)
+                            
+                            # カスタムフィールドの編集タブ
+                            if custom_fields and len(edit_tabs) > 5:
+                                with edit_tabs[5]:
+                                    st.info("カスタム項目を編集してください。")
+                                    for field in custom_fields:
+                                        current_value = cast_data_to_edit.get(field['field_name'], '')
+                                        if field['field_type'] == 'textarea':
+                                            locals()[f"edit_{field['field_name']}"] = st.text_area(
+                                                field['display_name'] + (" *" if field['is_required'] else ""),
+                                                value=current_value,
+                                                placeholder=field['placeholder']
+                                            )
+                                        else:
+                                            locals()[f"edit_{field['field_name']}"] = st.text_input(
+                                                field['display_name'] + (" *" if field['is_required'] else ""),
+                                                value=current_value,
+                                                placeholder=field['placeholder']
+                                            )
+                            
+                            if st.form_submit_button(label="この内容に更新する"):
+                                if edit_name:
+                                    # 動的フィールドを含む全フィールドで更新データを作成
+                                    all_fields = get_dynamic_persona_fields()
+                                    form_data = locals(); updated_data = {field: form_data.get(f"edit_{field}", "") for field in all_fields}
+                                    updated_data['allowed_categories'] = ",".join(edit_allowed_categories)
+                                    set_clause = ", ".join([f"{key} = ?" for key in updated_data.keys()]); params = tuple(updated_data.values()) + (cast_id_to_edit,)
+                                    execute_query(f"UPDATE casts SET {set_clause} WHERE id = ?", params)
+                                    execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (cast_id_to_edit,))
+                                    for group_name in edit_groups:
+                                        group_id = group_options.get(group_name)
+                                        execute_query("INSERT INTO cast_groups (cast_id, group_id) VALUES (?, ?)", (cast_id_to_edit, group_id))
+                                    st.success(f"「{selected_cast_name_edit}」のプロフィールを更新しました！"); st.rerun()
+                                else: st.error("キャスト名は必須です。")
                         
-                        posts = execute_query(
-                            """SELECT c.name as username, sp.category, sp.post_content, sp.sort_order
-                            FROM sample_posts sp
-                            JOIN casts c ON sp.cast_id = c.id
-                            ORDER BY c.name, sp.category, sp.sort_order""",
-                            fetch="all"
-                        )
+                        # X API 設定セクション
+                        st.markdown("---")
+                        st.subheader("🐦 X (Twitter) API 設定")
                         
-                        export_data = [dict(p) for p in posts]
-                        df = pd.DataFrame(export_data)
+                        # 現在の認証情報を取得
+                        current_credentials = get_cast_x_credentials(cast_id_to_edit)
                         
-                        csv_buffer = io.StringIO()
-                        df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+                        if current_credentials:
+                            st.success(f"✅ X API認証情報が設定済みです")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                twitter_username = current_credentials['twitter_username'] if current_credentials['twitter_username'] else '未取得'
+                                st.info(f"🔗 Twitterアカウント: @{twitter_username}")
+                            with col2:
+                                updated_at = current_credentials['updated_at'] if current_credentials['updated_at'] else '不明'
+                                st.info(f"📅 最終更新: {updated_at}")
+                            
+                            # 認証テストボタン
+                            if st.button("🔍 認証状況を確認", key=f"test_auth_{cast_id_to_edit}"):
+                                with st.spinner("認証情報を確認中..."):
+                                    try:
+                                        # キャッシュされたクライアントを削除して再認証
+                                        if cast_id_to_edit in x_poster.cast_clients:
+                                            del x_poster.cast_clients[cast_id_to_edit]
+                                        
+                                        success, message, user_data = x_poster.setup_cast_credentials(
+                                            cast_id_to_edit,
+                                            current_credentials['api_key'],
+                                            current_credentials['api_secret'], 
+                                            current_credentials['bearer_token'],
+                                            current_credentials['access_token'],
+                                            current_credentials['access_token_secret']
+                                        )
+                                        
+                                        if success:
+                                            st.success(message)
+                                            if user_data:
+                                                # アカウント情報を更新
+                                                save_cast_x_credentials(
+                                                    cast_id_to_edit,
+                                                    current_credentials['api_key'],
+                                                    current_credentials['api_secret'],
+                                                    current_credentials['bearer_token'], 
+                                                    current_credentials['access_token'],
+                                                    current_credentials['access_token_secret'],
+                                                    user_data.username,
+                                                    str(user_data.id)
+                                                )
+                                                st.info(f"✨ アカウント情報を更新: @{user_data.username} ({user_data.name})")
+                                        else:
+                                            st.error(message)
+                                    except Exception as e:
+                                        st.error(f"認証確認中にエラーが発生しました: {e}")
                         
-                        st.download_button(
-                            label="💾 sample_posts.csv をダウンロード",
-                            data=csv_buffer.getvalue(),
-                            file_name="sample_posts.csv",
-                            mime="text/csv"
-                        )
-                        st.success(f"✅ {len(export_data)}件のサンプル投稿をエクスポートしました")
-                    except Exception as e:
-                        st.error(f"エクスポートエラー: {e}")
+                        # 認証情報設定/編集フォーム
+                        with st.expander("🔧 X API認証情報の設定/編集", expanded=not bool(current_credentials)):
+                            st.info("""
+                            **設定手順:**
+                            1. [X Developer Portal](https://developer.twitter.com) でアプリを作成
+                            2. Read and Write権限を設定
+                            3. 以下のキーを取得して入力
+                            """)
+                            
+                            with st.form(f"x_api_form_{cast_id_to_edit}"):
+                                x_api_key = st.text_input(
+                                    "API Key", 
+                                    value=current_credentials.get('api_key', '') if current_credentials else '',
+                                    type="password",
+                                    help="Consumer Key とも呼ばれます"
+                                )
+                                x_api_secret = st.text_input(
+                                    "API Secret", 
+                                    value=current_credentials.get('api_secret', '') if current_credentials else '',
+                                    type="password",
+                                    help="Consumer Secret とも呼ばれます"
+                                )
+                                x_bearer_token = st.text_input(
+                                    "Bearer Token", 
+                                    value=current_credentials.get('bearer_token', '') if current_credentials else '',
+                                    type="password"
+                                )
+                                x_access_token = st.text_input(
+                                    "Access Token", 
+                                    value=current_credentials.get('access_token', '') if current_credentials else '',
+                                    type="password"
+                                )
+                                x_access_token_secret = st.text_input(
+                                    "Access Token Secret", 
+                                    value=current_credentials.get('access_token_secret', '') if current_credentials else '',
+                                    type="password"
+                                )
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.form_submit_button("💾 認証情報を保存", type="primary"):
+                                        if all([x_api_key, x_api_secret, x_bearer_token, x_access_token, x_access_token_secret]):
+                                            with st.spinner("認証情報を検証中..."):
+                                                try:
+                                                    # 認証テスト
+                                                    success, message, user_data = x_poster.setup_cast_credentials(
+                                                        cast_id_to_edit, x_api_key, x_api_secret, x_bearer_token, x_access_token, x_access_token_secret
+                                                    )
+                                                    
+                                                    if success:
+                                                        # データベースに保存
+                                                        if save_cast_x_credentials(
+                                                            cast_id_to_edit, x_api_key, x_api_secret, x_bearer_token, x_access_token, x_access_token_secret,
+                                                            user_data.username if user_data else None,
+                                                            str(user_data.id) if user_data else None
+                                                        ):
+                                                            st.success(f"✅ 認証情報を保存しました！")
+                                                            if user_data:
+                                                                st.info(f"🔗 連携アカウント: @{user_data.username} ({user_data.name})")
+                                                            st.rerun()
+                                                        else:
+                                                            st.error("認証情報の保存に失敗しました")
+                                                    else:
+                                                        st.error(f"認証に失敗しました: {message}")
+                                                except Exception as e:
+                                                    st.error(f"認証確認中にエラーが発生しました: {e}")
+                                        else:
+                                            st.error("すべての項目を入力してください")
+                                
+                                with col2:
+                                    if current_credentials and st.form_submit_button("🗑️ 認証情報を削除", type="secondary"):
+                                        if delete_cast_x_credentials(cast_id_to_edit):
+                                            st.success("認証情報を削除しました")
+                                            st.rerun()
+                                        else:
+                                            st.error("認証情報の削除に失敗しました")
+                        
+                        # Google Sheets 設定セクション
+                        st.markdown("---")
+                        st.subheader("📊 Google Sheets 設定")
+                        
+                        # 現在のGoogle Sheets設定を取得
+                        current_sheets_config = get_cast_sheets_config(cast_id_to_edit)
+                        
+                        if current_sheets_config:
+                            st.success(f"✅ Google Sheets設定が設定済みです")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                sheets_id = current_sheets_config['spreadsheet_id']
+                                display_id = f"{sheets_id[:15]}..." if len(sheets_id) > 15 else sheets_id
+                                st.info(f"📋 スプレッドシートID: {display_id}")
+                            with col2:
+                                updated_at = current_sheets_config['updated_at'] if current_sheets_config['updated_at'] else '不明'
+                                st.info(f"📅 最終更新: {updated_at}")
+                        else:
+                            st.info("⚠️ Google Sheets設定が未設定です")
+                        
+                        with st.expander("� Google Sheets設定（シンプル版）", expanded=not bool(current_sheets_config)):
+                            with st.form(f"sheets_config_form_{cast_id_to_edit}"):
+                                st.markdown("""
+                                **📊 シンプルGoogle Sheets設定:**
+                                - 共通のGoogle認証を使用（`credentials/credentials.json`）
+                                - キャスト毎に異なるスプレッドシート・シートを設定可能
+                                - 認証は1回のみ、設定は簡単！
+                                """)
+                                
+                                # スプレッドシートID
+                                sheets_spreadsheet_id = st.text_input(
+                                    "📊 スプレッドシートID", 
+                                    value=current_sheets_config['spreadsheet_id'] if current_sheets_config else '',
+                                    placeholder="1VPSyQOp0p2U9bPHghP4JZiyePsev2Uoq3nVbbC26VAo",
+                                    help="Google SheetsのURLから取得: https://docs.google.com/spreadsheets/d/【ここがID】/edit"
+                                )
+                                
+                                # シート名
+                                sheets_sheet_name = st.text_input(
+                                    "📄 シート名", 
+                                    value=current_sheets_config['sheet_name'] if current_sheets_config else 'Sheet1',
+                                    placeholder="投稿メッセージリスト"
+                                )
+                                
+                                st.markdown("""
+                                **📝 設定手順:**
+                                1. Google Sheetsでスプレッドシートを作成
+                                2. URLからスプレッドシートIDをコピー
+                                3. シート名を確認（デフォルト: Sheet1）
+                                4. 認証は共通ファイル `credentials/credentials.json` を使用
+                                
+                                **� 利点:**
+                                - 認証ファイル設定不要！
+                                - 同一Googleアカウントで複数スプレッドシート管理
+                                - シンプルで分かりやすい設定
+                                """)
+                                
+                                st.markdown("---")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.form_submit_button("💾 Google Sheets設定を保存", type="primary"):
+                                        if sheets_spreadsheet_id:
+                                            if save_cast_sheets_config(
+                                                cast_id_to_edit, 
+                                                sheets_spreadsheet_id, 
+                                                sheets_sheet_name
+                                            ):
+                                                st.success("✅ Google Sheets設定を保存しました！")
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ 設定の保存に失敗しました")
+                                        else:
+                                            st.error("⚠️ スプレッドシートIDを入力してください")
+                                
+                                with col2:
+                                    if current_sheets_config and st.form_submit_button("🗑️ Google Sheets設定を削除", type="secondary"):
+                                        if delete_cast_sheets_config(cast_id_to_edit):
+                                            st.success("✅ Google Sheets設定を削除しました")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ 設定の削除に失敗しました")
+                        
+                        # アクション別設定セクション（フォーム外）
+                        st.markdown("---")
+                        st.markdown("### 🎯 アクション別シート設定")
+                        
+                        action_types = ['post', 'retweet']
+                        action_labels = {
+                            'post': '📝 通常投稿',
+                            'retweet': '🔄 リツイート・引用ツイート'
+                        }
+                        
+                        for action_type in action_types:
+                            with st.expander(f"{action_labels[action_type]} 設定", expanded=False):
+                                current_action_config = get_cast_sheets_config(cast_id_to_edit, action_type)
+                                
+                                # 各アクションごとに独立したフォームを作成
+                                with st.form(key=f"form_{action_type}_config"):
+                                    col_a1, col_a2 = st.columns(2)
+                                    with col_a1:
+                                        action_spreadsheet_id = st.text_input(
+                                            f"📊 {action_labels[action_type]} スプレッドシートID",
+                                            value=current_action_config['spreadsheet_id'] if current_action_config else '',
+                                            placeholder="1VPSyQOp0p2U9bPHghP4JZiyePsev2Uoq3nVbbC26VAo"
+                                        )
+                                    
+                                    with col_a2:
+                                        action_sheet_name = st.text_input(
+                                            f"📄 {action_labels[action_type]} シート名",
+                                            value=current_action_config['sheet_name'] if current_action_config else f"{action_type}_sheet",
+                                            placeholder=f"{action_type}_sheet"
+                                        )
+                                    
+                                    if st.form_submit_button(f"💾 {action_labels[action_type]}設定を保存", type="secondary"):
+                                        if action_spreadsheet_id:
+                                            if save_cast_action_sheets_config(
+                                                cast_id_to_edit, 
+                                                action_type,
+                                                action_spreadsheet_id, 
+                                                action_sheet_name
+                                            ):
+                                                st.success(f"✅ {action_labels[action_type]}設定を保存しました！")
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ 設定の保存に失敗しました")
+                                        else:
+                                            st.error("⚠️ スプレッドシートIDを入力してください")
+                        
+                        with st.expander("🚨 Danger Zone: キャストの削除", expanded=False):
+                            st.warning(f"**警告:** キャスト「{selected_cast_name_edit}」を削除すると、関連するすべての投稿も永久に削除され、元に戻すことはできません。")
+                            delete_confirmation = st.text_input(f"削除を確定するには、キャスト名「{selected_cast_name_edit}」を以下に入力してください。")
+                            if st.button("このキャストを完全に削除する", type="primary"):
+                                if delete_confirmation == selected_cast_name_edit:
+                                    execute_query("DELETE FROM posts WHERE cast_id = ?", (cast_id_to_edit,))
+                                    execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (cast_id_to_edit,))
+                                    execute_query("DELETE FROM casts WHERE id = ?", (cast_id_to_edit,))
+                                    st.success(f"キャスト「{selected_cast_name_edit}」を削除しました。"); st.rerun()
+                                else: st.error("入力されたキャスト名が一致しません。")
+        
+        with tab_list:
+            st.header("登録済みキャスト一覧")
+            all_casts = execute_query("SELECT * FROM casts ORDER BY name", fetch="all")
+            if all_casts:
+                st.info(f"登録済みキャスト数: {len(all_casts)}件")
+                for cast in all_casts:
+                    display_name = f"{cast['name']}（{cast['nickname']}）" if cast['nickname'] else cast['name']
+                    with st.expander(f"👤 {display_name}", expanded=False):
+                        cast_dict = dict(cast)
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**基本情報**")
+                            st.write(f"• 名前: {cast_dict.get('name', '')}")
+                            st.write(f"• ニックネーム: {cast_dict.get('nickname', '')}")
+                            st.write(f"• 年齢: {cast_dict.get('age', '')}")
+                            st.write(f"• 誕生日: {cast_dict.get('birthday', '')}")
+                            st.write(f"• 出身地: {cast_dict.get('birthplace', '')}")
+                            st.write(f"• 外見: {cast_dict.get('appearance', '')}")
+                            
+                            st.write("**性格・話し方**")
+                            st.write(f"• 性格: {cast_dict.get('personality', '')}")
+                            st.write(f"• 長所: {cast_dict.get('strength', '')}")
+                            st.write(f"• 短所: {cast_dict.get('weakness', '')}")
+                            st.write(f"• 一人称: {cast_dict.get('first_person', '')}")
+                            st.write(f"• 口調: {cast_dict.get('speech_style', '')}")
+                            st.write(f"• 口癖: {cast_dict.get('catchphrase', '')}")
+                            st.write(f"• 接客スタイル: {cast_dict.get('customer_interaction', '')}")
+                        
+                        with col2:
+                            st.write("**背景ストーリー**")
+                            st.write(f"• 職業: {cast_dict.get('occupation', '')}")
+                            st.write(f"• 趣味: {cast_dict.get('hobby', '')}")
+                            st.write(f"• 好きなもの: {cast_dict.get('likes', '')}")
+                            st.write(f"• 嫌いなもの: {cast_dict.get('dislikes', '')}")
+                            st.write(f"• 休日の過ごし方: {cast_dict.get('holiday_activity', '')}")
+                            st.write(f"• 夢: {cast_dict.get('dream', '')}")
+                            st.write(f"• 仕事の理由: {cast_dict.get('reason_for_job', '')}")
+                            st.write(f"• 秘密: {cast_dict.get('secret', '')}")
+                            st.write(f"• 許可カテゴリ: {cast_dict.get('allowed_categories', '')}")
+                            
+                            # カスタムフィールドがある場合は表示
+                            custom_fields = execute_query("SELECT * FROM custom_fields ORDER BY sort_order", fetch="all")
+                            if custom_fields:
+                                st.write("**カスタム項目**")
+                                for field in custom_fields:
+                                    field_value = cast_dict.get(field['field_name'], '')
+                                    st.write(f"• {field['display_name']}: {field_value}")
+            else:
+                st.info("登録済みのキャストはまだありません。")
+        
+        with ai_gen_tab:
+            st.header("🤖 AIキャスト自動生成")
+            st.markdown("AIを使って複数のキャストプロフィールを自動生成し、一括でCSV登録できます。")
+            
+            # 成功メッセージの表示
+            if "ai_gen_message" in st.session_state:
+                msg_type, msg_content = st.session_state.ai_gen_message
+                if msg_type == "success":
+                    st.success(msg_content)
+                elif msg_type == "warning":
+                    st.warning(msg_content)
+                elif msg_type == "error":
+                    st.error(msg_content)
+                del st.session_state.ai_gen_message
+            
+            with st.form("ai_cast_generation"):
+                st.subheader("🎯 生成設定")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    gen_count = st.number_input("生成するキャスト数", min_value=1, max_value=20, value=5)
+                    gen_instruction = st.text_area(
+                        "簡単な指示文（任意）", 
+                        placeholder="例：アニメ風の可愛いキャラクター、ファンタジー世界の住人、現代の学生など",
+                        height=100
+                    )
+                
+                with col2:
+                    st.subheader("🔧 事前登録項目")
+                    name_pairs_placeholder = get_app_setting("name_pairs_placeholder", "例：\n@hanao_tanaka,田中 花音\n@misaki_sato,佐藤 美咲\n@aina_suzuki,鈴木 愛菜")
+                    gen_names = st.text_area(
+                        "ユーザー名,名前 のペアリスト（必須）\n※1行に1ペアずつ入力",
+                        placeholder=name_pairs_placeholder,
+                        height=100
+                    )
+                    gen_gender_ratio = st.selectbox(
+                        "性別比率",
+                        ["ランダム", "全て女性", "全て男性", "女性多め", "男性多め"]
+                    )
+                
+                # 許可カテゴリの選択
+                st.subheader("📚 許可するシチュエーションカテゴリ")
+                cat_rows = execute_query("SELECT name FROM situation_categories ORDER BY name", fetch="all")
+                category_options = [row['name'] for row in cat_rows] if cat_rows else []
+                
+                if category_options:
+                    gen_categories = st.multiselect(
+                        "生成されたキャストに許可するカテゴリ（複数選択可）",
+                        category_options,
+                        default=category_options[:3]  # 最初の3つをデフォルト選択
+                    )
+                else:
+                    st.warning("カテゴリが登録されていません。「カテゴリ管理」で先にカテゴリを作成してください。")
+                    gen_categories = []
+                
+                # 所属グループの選択
+                group_rows = execute_query("SELECT id, name FROM groups ORDER BY name", fetch="all")
+                group_options = {row['name']: row['id'] for row in group_rows} if group_rows else {}
+                
+                if group_options:
+                    gen_groups = st.multiselect(
+                        "所属グループ（任意）",
+                        list(group_options.keys())
+                    )
+                else:
+                    gen_groups = []
+                
+                generate_button = st.form_submit_button("🚀 キャストを自動生成", type="primary")
+            
+            # フォーム外での生成処理
+            if generate_button:
+                    if not gen_names.strip():
+                        st.error("ユーザー名,名前のペアリストは必須です。1行に1ペアずつ入力してください。")
+                    elif not gen_categories:
+                        st.error("最低1つのカテゴリを選択してください。")
+                    elif not st.session_state.get('gemini_model'):
+                        st.error("AIモデルが利用できません。")
+                    else:
+                        # ユーザー名,名前ペアリストを処理
+                        name_pairs = []
+                        for line in gen_names.strip().split('\n'):
+                            line = line.strip()
+                            if line and ',' in line:
+                                username, display_name = [part.strip() for part in line.split(',', 1)]
+                                if username and display_name:
+                                    name_pairs.append((username, display_name))
+                        
+                        actual_count = min(gen_count, len(name_pairs))
+                        
+                        if actual_count == 0:
+                            st.error("有効なユーザー名,名前のペアが入力されていません。正しい形式：@username,表示名")
+                        else:
+                            # 性別比率の設定
+                            gender_weights = {
+                                "ランダム": {"女性": 0.5, "男性": 0.5},
+                                "全て女性": {"女性": 1.0, "男性": 0.0},
+                                "全て男性": {"女性": 0.0, "男性": 1.0},
+                                "女性多め": {"女性": 0.7, "男性": 0.3},
+                                "男性多め": {"女性": 0.3, "男性": 0.7}
+                            }
+                            
+                            generated_casts = []
+                            progress_bar = st.progress(0, text="AIキャストを生成中...")
+                            
+                            for i in range(actual_count):
+                                progress_bar.progress((i + 1) / actual_count, text=f"キャスト {i+1}/{actual_count} を生成中...")
+                                
+                                username, display_name = name_pairs[i]
+                                
+                                # 性別を決定
+                                weights = gender_weights[gen_gender_ratio]
+                                gender = random.choices(["女性", "男性"], weights=[weights["女性"], weights["男性"]])[0]
+                                
+                                # AIプロンプトを作成
+                                default_instruction = get_app_setting("ai_generation_instruction", "魅力的で個性豊かなキャラクター")
+                                base_instruction = gen_instruction if gen_instruction.strip() else default_instruction
+                                
+                                prompt = f"""以下の指示に従って、キャラクターのプロフィールを生成してください。
 
+# 基本設定
+- ユーザー名: {username}
+- 名前（表示名）: {display_name}
+- 性別: {gender}
+- 追加指示: {base_instruction}
 
+# 出力形式
+以下の項目を必ず含めて、自然で魅力的なキャラクタープロフィールを作成してください：
+
+**基本情報**
+- ニックネーム: （親しみやすい呼び方）
+- 年齢: （具体的な年齢）
+- 誕生日: （月日）
+- 出身地: （都道府県）
+- 外見の特徴: （髪型、服装、特徴的な部分など）
+
+**性格・話し方**
+- 性格: （一言で表現）
+- 長所: （魅力的な点）
+- 短所: （親しみやすい欠点）
+- 一人称: （私、僕、俺など）
+- 口調・語尾: （話し方の特徴）
+- 口癖: （「」で囲んで）
+- お客様への接し方: （接客スタイル）
+
+**背景ストーリー**
+- 職業／学業: （現在の所属）
+- 趣味や特技: （興味のあること）
+- 好きなもの: （具体的に）
+- 嫌いなもの: （具体的に）
+- 休日の過ごし方: （日常の様子）
+- 将来の夢: （目標や憧れ）
+- なぜこの仕事をしているのか: （動機）
+- ちょっとした秘密: （親しみやすい秘密）
+
+# ルール
+- 各項目は簡潔で具体的に
+- キャラクターに一貫性を持たせる
+- 親しみやすく魅力的な設定にする
+- 性別に合った自然な設定にする"""
+
+                                try:
+                                    response = safe_generate_content(st.session_state.gemini_model, prompt)
+                                    ai_profile = response.text
+                                    
+                                    # AI出力を解析してフィールドに分割
+                                    cast_data = parse_ai_profile(ai_profile, username, display_name, gen_categories)
+                                    generated_casts.append(cast_data)
+                                    
+                                    time.sleep(2)  # API制限を考慮
+                                    
+                                except Exception as e:
+                                    st.warning(f"キャスト「{display_name}（{username}）」の生成中にエラーが発生しました: {e}")
+                                    continue
+                            
+                            if generated_casts:
+                                # CSV形式でダウンロード用データを作成
+                                df = pandas_lib.DataFrame(generated_casts)
+                                csv_data = df.to_csv(index=False).encode('utf-8')
+                                
+                                # セッション状態に保存
+                                st.session_state.generated_casts_data = csv_data
+                                st.session_state.generated_casts_list = generated_casts
+                                st.session_state.ai_gen_message = ("success", f"{len(generated_casts)}件のキャストプロフィールを生成しました！")
+                            else:
+                                st.session_state.ai_gen_message = ("error", "キャストの生成に失敗しました。")
+                            
+                            st.rerun()
+            
+            # 生成完了後のダウンロードボタン表示（フォーム外）
+            if 'generated_casts_data' in st.session_state:
+                st.subheader("🎉 生成完了")
+                st.info(f"{len(st.session_state.generated_casts_list)}件のキャストが生成されました。以下からCSVをダウンロードして、「CSV管理」タブからインポートしてください。")
+                
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.download_button(
+                        "📥 生成されたキャストをCSVでダウンロード",
+                        data=st.session_state.generated_casts_data,
+                        file_name=f'ai_generated_casts_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+                        mime='text/csv',
+                        use_container_width=True
+                    )
+                with col2:
+                    if st.button("🗑️ 生成結果をクリア", use_container_width=True):
+                        if 'generated_casts_data' in st.session_state:
+                            del st.session_state.generated_casts_data
+                        if 'generated_casts_list' in st.session_state:
+                            del st.session_state.generated_casts_list
+                        st.rerun()
+                
+                # プレビュー表示
+                with st.expander("生成されたキャストのプレビュー", expanded=True):
+                    for i, cast in enumerate(st.session_state.generated_casts_list[:3]):  # 最初の3件のみ表示
+                        st.write(f"**{i+1}. {cast['name']}**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"• ニックネーム: {cast.get('nickname', '')}")
+                            st.write(f"• 年齢: {cast.get('age', '')}")
+                            st.write(f"• 性格: {cast.get('personality', '')}")
+                        with col2:
+                            st.write(f"• 職業: {cast.get('occupation', '')}")
+                            st.write(f"• 趣味: {cast.get('hobby', '')}")
+                            st.write(f"• 口癖: {cast.get('catchphrase', '')}")
+                        if i < len(st.session_state.generated_casts_list) - 1:
+                            st.markdown("---")
+                    
+                    if len(st.session_state.generated_casts_list) > 3:
+                        st.info(f"他 {len(st.session_state.generated_casts_list) - 3} 件のキャストも生成されました。CSVファイルで全て確認できます。")
+            
+            st.markdown("---")
+            st.subheader("💡 使い方")
+            st.markdown("""
+            1. **生成設定**：作りたいキャスト数と簡単な指示を入力
+            2. **基本情報**：名前リストと性別比率を設定
+            3. **カテゴリ選択**：生成されたキャストが使用できるシチュエーションを選択
+            4. **自動生成**：AIが各キャストの詳細プロフィールを生成
+            5. **CSV保存**：生成結果をCSVでダウンロード
+            6. **一括登録**：「CSV管理」タブからインポートして一括登録
+            7. **チューニング**：「個別管理」タブで各キャストを編集・調整
+            """)
+
+    elif page == "グループ管理":
+        st.title("🏢 グループ管理"); st.markdown("キャストに共通のプロフィール（職場や所属など）を設定します。")
+        st.header("新しいグループの作成")
+        with st.form(key="new_group_form", clear_on_submit=True):
+            new_name = st.text_input("グループ名", placeholder="例：喫茶アルタイル")
+            new_content = st.text_area("内容（共通プロフィール）", placeholder="あなたは銀座の路地裏にある、星をテーマにした小さな喫茶店「アルタイル」の店員です。")
+            if st.form_submit_button("作成する"):
+                if new_name and new_content:
+                    if execute_query("INSERT INTO groups (name, content) VALUES (?, ?)", (new_name, new_content)) is not False: st.success("新しいグループを作成しました！")
+                else: st.warning("グループ名と内容の両方を入力してください。")
+        st.markdown("---")
+        st.header("登録済みグループ一覧")
+        all_groups = execute_query("SELECT id, name, content FROM groups ORDER BY id DESC", fetch="all")
+        if all_groups:
+            for group in all_groups:
+                with st.expander(f"🏢 {group['name']}", expanded=False):
+                    with st.form(key=f"edit_group_{group['id']}"):
+                        # 編集フィールド
+                        new_name = st.text_input("グループ名", value=group['name'])
+                        new_content = st.text_area("内容（共通プロフィール）", value=group['content'], height=100)
+                        
+                        # ボタン
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        update_btn = col_btn1.form_submit_button("更新", type="primary")
+                        delete_btn = col_btn2.form_submit_button("削除")
+                        cancel_btn = col_btn3.form_submit_button("キャンセル")
+                        
+                        if update_btn:
+                            if new_name and new_content:
+                                if execute_query("UPDATE groups SET name = ?, content = ? WHERE id = ?", 
+                                               (new_name, new_content, group['id'])) is not False:
+                                    st.success("グループを更新しました！")
+                                    st.rerun()
+                            else:
+                                st.warning("グループ名と内容の両方を入力してください。")
+                        
+                        if delete_btn:
+                            execute_query("DELETE FROM cast_groups WHERE group_id = ?", (group['id'],))
+                            if execute_query("DELETE FROM groups WHERE id = ?", (group['id'],)) is not False:
+                                st.success("グループを削除しました。")
+                                st.rerun()
+        else: 
+            st.info("登録済みのグループはありません。")
+
+    elif page == "カテゴリ管理":
+        st.title("📚 カテゴリ管理"); st.markdown("シチュエーションを分類するためのカテゴリを管理します。")
+        st.header("新しいカテゴリの追加")
+        with st.form(key="new_category_form", clear_on_submit=True):
+            new_name = st.text_input("カテゴリ名", placeholder="例：日常")
+            if st.form_submit_button("追加する"):
+                if new_name:
+                    if execute_query("INSERT INTO situation_categories (name) VALUES (?)", (new_name,)) is not False: st.success("新しいカテゴリを追加しました！")
+                else: st.warning("カテゴリ名を入力してください。")
+        st.markdown("---")
+        st.header("登録済みカテゴリ一覧")
+        all_categories = execute_query("SELECT id, name FROM situation_categories ORDER BY id DESC", fetch="all")
+        if all_categories:
+            for cat in all_categories:
+                with st.expander(f"📚 {cat['name']}", expanded=False):
+                    with st.form(key=f"edit_category_{cat['id']}"):
+                        # 編集フィールド
+                        new_name = st.text_input("カテゴリ名", value=cat['name'])
+                        
+                        # ボタン
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        update_btn = col_btn1.form_submit_button("更新", type="primary")
+                        delete_btn = col_btn2.form_submit_button("削除")
+                        cancel_btn = col_btn3.form_submit_button("キャンセル")
+                        
+                        if update_btn:
+                            if new_name:
+                                if execute_query("UPDATE situation_categories SET name = ? WHERE id = ?", 
+                                               (new_name, cat['id'])) is not False:
+                                    st.success("カテゴリを更新しました！")
+                                    st.rerun()
+                            else:
+                                st.warning("カテゴリ名を入力してください。")
+                        
+                        if delete_btn:
+                            st.warning(f"カテゴリ「{cat['name']}」を削除すると、関連するシチュエーションもすべて削除されます。")
+                            if st.form_submit_button("はい, 削除します", key=f"confirm_delete_{cat['id']}"):
+                                execute_query("DELETE FROM situations WHERE category_id = ?", (cat['id'],))
+                                if execute_query("DELETE FROM situation_categories WHERE id = ?", (cat['id'],)) is not False:
+                                    st.success("カテゴリを削除しました。")
+                                    st.rerun()
+        else: 
+            st.info("登録済みのカテゴリはありません。")
+
+    elif page == "シチュエーション管理":
+        st.title("🎭 シチュエーション管理"); st.markdown("キャラクターが「今、何をしているか」を定義し、投稿の多様性を生み出します。")
+        
+        # インポート成功メッセージの表示
+        if "situation_import_message" in st.session_state:
+            msg_type, msg_content = st.session_state.situation_import_message
+            if msg_type == "success":
+                st.success(msg_content)
+            elif msg_type == "warning":
+                st.warning(msg_content)
+            elif msg_type == "error":
+                st.error(msg_content)
+            del st.session_state.situation_import_message
+        
+        st.subheader("一括管理（CSV）")
+        with st.expander("CSVでのインポート/エクスポートはこちら", expanded=False):
+            c1, c2 = st.columns(2)
+            uploaded_file = c1.file_uploader("CSVファイル（1行目:ID、2行目:項目説明、3行目～:データ）", type="csv", key="sit_csv_up")
+            if uploaded_file:
+                try:
+                    # ファイルポインタをリセット
+                    uploaded_file.seek(0)
+                    
+                    # まず全体を読み込んで行数を確認
+                    all_lines = uploaded_file.read().decode('utf-8').strip().split('\n')
+                    uploaded_file.seek(0)
+                    
+                    if len(all_lines) < 3:
+                        st.error("CSVファイルには最低3行（ヘッダー行、説明行、データ行）が必要です。")
+                        st.info("現在のファイル構造：")
+                        for i, line in enumerate(all_lines, 1):
+                            st.text(f"{i}行目: {line}")
+                    else:
+                        # 正しい形式で読み込み：1行目をヘッダーとして使用し、2行目をスキップ
+                        df = pandas_lib.read_csv(uploaded_file, skiprows=[1], dtype=str).fillna("")
+                        
+                        # 必要な列の存在チェック
+                        required_columns = ['content', 'time_slot', 'category']
+                        missing_columns = [col for col in required_columns if col not in df.columns]
+                        
+                        if missing_columns:
+                            st.error(f"CSVに必要な列が不足しています: {', '.join(missing_columns)}")
+                            st.info("必要な列: content (シチュエーション内容), time_slot (時間帯), category (カテゴリ名)")
+                        else:
+                            cat_rows = execute_query("SELECT id, name FROM situation_categories", fetch="all")
+                            cat_map = {row['name']: row['id'] for row in cat_rows}
+                            
+                            success_count = 0
+                            error_rows = []
+                            
+                            for index, row in df.iterrows():
+                                content = row.get('content', '').strip()
+                                time_slot = row.get('time_slot', 'いつでも').strip()
+                                category_name = row.get('category', '').strip()
+                                
+                                if not content:
+                                    error_rows.append(f"行{index+3}: シチュエーション内容が空です")
+                                    continue
+                                    
+                                if not category_name:
+                                    error_rows.append(f"行{index+3}: カテゴリが空です")
+                                    continue
+                                    
+                                cat_id = cat_map.get(category_name)
+                                if not cat_id:
+                                    error_rows.append(f"行{index+3}: カテゴリ「{category_name}」が存在しません")
+                                    continue
+                                
+                                # time_slotの値をチェック
+                                valid_time_slots = ["いつでも", "朝", "昼", "夜"]
+                                if time_slot not in valid_time_slots:
+                                    time_slot = "いつでも"  # デフォルト値に設定
+                                
+                                # 重複チェック
+                                existing = execute_query("SELECT id FROM situations WHERE content = ?", (content,), fetch="one")
+                                if existing:
+                                    error_rows.append(f"行{index+3}: シチュエーション「{content}」は既に存在します")
+                                    continue
+                                
+                                result = execute_query("INSERT INTO situations (content, time_slot, category_id) VALUES (?, ?, ?)", 
+                                                    (content, time_slot, cat_id))
+                                if result is not False:
+                                    success_count += 1
+                            
+                            # 結果の表示とリロード処理
+                            if success_count > 0:
+                                if error_rows:
+                                    error_summary = f"{success_count}件のシチュエーションをインポートしました。{len(error_rows)}件のエラーがありました。"
+                                    st.session_state.situation_import_message = ("warning", error_summary)
+                                else:
+                                    st.session_state.situation_import_message = ("success", f"{success_count}件のシチュエーションをインポートしました。")
+                                # 必ずリロードを実行
+                                st.rerun()
+                            elif error_rows:
+                                # 追加されたデータがない場合はエラーメッセージのみ表示
+                                st.error(f"インポートできませんでした。{len(error_rows)}件のエラーがあります。")
+                                for error in error_rows[:3]:  # 最初の3件のエラーのみ表示
+                                    st.write(f"• {error}")
+                            
+                except Exception as e:
+                    st.error(f"CSVの処理中にエラーが発生しました: {e}")
+                    st.info("CSVファイルの形式を確認してください。1行目: 列名、2行目: 説明、3行目以降: データ")
+            
+            all_sits_for_export = execute_query("SELECT s.content, s.time_slot, sc.name as category FROM situations s LEFT JOIN situation_categories sc ON s.category_id = sc.id", fetch="all")
+            if all_sits_for_export:
+                df = pandas_lib.DataFrame([dict(r) for r in all_sits_for_export])
+                c2.download_button("CSVエクスポート", df.to_csv(index=False).encode('utf-8'), "situations.csv", "text/csv", use_container_width=True)
+        st.markdown("---")
+        st.header("個別管理")
+        with st.form(key="new_situation_form", clear_on_submit=True):
+            situation_placeholder = get_app_setting("situation_placeholder", "例：お気に入りの喫茶店で読書中")
+            new_content = st.text_area("シチュエーション内容", placeholder=situation_placeholder)
+            c1, c2 = st.columns(2)
+            time_slot = c1.selectbox("時間帯", ["いつでも", "朝", "昼", "夜"])
+            cat_rows = execute_query("SELECT id, name FROM situation_categories ORDER BY name", fetch="all")
+            category_options = [row['name'] for row in cat_rows] if cat_rows else []
+            selected_category_name = c2.selectbox("カテゴリ", category_options)
+            if st.form_submit_button("追加する"):
+                if new_content and selected_category_name:
+                    category_id = next((c['id'] for c in cat_rows if c['name'] == selected_category_name), None)
+                    if execute_query("INSERT INTO situations (content, time_slot, category_id) VALUES (?, ?, ?)", (new_content, time_slot, category_id)) is not False: 
+                        st.session_state.situation_import_message = ("success", "新しいシチュエーションを追加しました！")
+                        st.rerun()
+                else: st.warning("内容とカテゴリの両方を入力・選択してください。")
+        st.header("登録済みシチュエーション一覧")
+        all_situations = execute_query("SELECT s.id, s.content, s.time_slot, sc.name as category_name, s.category_id FROM situations s LEFT JOIN situation_categories sc ON s.category_id = sc.id ORDER BY s.id DESC", fetch="all")
+        if all_situations:
+            cat_rows = execute_query("SELECT id, name FROM situation_categories ORDER BY name", fetch="all")
+            category_options = [row['name'] for row in cat_rows] if cat_rows else []
+            time_slot_options = ["いつでも", "朝", "昼", "夜"]
+            
+            for sit in all_situations:
+                with st.expander(f"📝 {sit['content'][:50]}{'...' if len(sit['content']) > 50 else ''}", expanded=False):
+                    with st.form(key=f"edit_situation_{sit['id']}"):
+                        col1, col2 = st.columns(2)
+                        
+                        # 編集フィールド
+                        new_content = st.text_area("シチュエーション内容", value=sit['content'], height=100)
+                        current_time_slot_index = time_slot_options.index(sit['time_slot']) if sit['time_slot'] in time_slot_options else 0
+                        new_time_slot = col1.selectbox("時間帯", time_slot_options, index=current_time_slot_index, key=f"time_{sit['id']}")
+                        current_category_index = next((i for i, cat in enumerate(category_options) if cat == sit['category_name']), 0)
+                        new_category_name = col2.selectbox("カテゴリ", category_options, index=current_category_index, key=f"cat_{sit['id']}")
+                        
+                        # ボタン
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        update_btn = col_btn1.form_submit_button("更新", type="primary")
+                        delete_btn = col_btn2.form_submit_button("削除")
+                        cancel_btn = col_btn3.form_submit_button("キャンセル")
+                        
+                        if update_btn:
+                            if new_content and new_category_name:
+                                new_category_id = next((c['id'] for c in cat_rows if c['name'] == new_category_name), None)
+                                if execute_query("UPDATE situations SET content = ?, time_slot = ?, category_id = ? WHERE id = ?", 
+                                               (new_content, new_time_slot, new_category_id, sit['id'])) is not False:
+                                    st.success("シチュエーションを更新しました！")
+                                    st.rerun()
+                            else:
+                                st.warning("内容とカテゴリの両方を入力・選択してください。")
+                        
+                        if delete_btn:
+                            if execute_query("DELETE FROM situations WHERE id = ?", (sit['id'],)) is not False:
+                                st.success("シチュエーションを削除しました。")
+                                st.rerun()
+        else: 
+            st.info("登録済みのシチュエーションはありません。")
+    
+    elif page == "アドバイス管理":
+        st.title("💡 アドバイス管理"); st.markdown("投稿に対するフィードバックの選択肢（アドバイス）を管理します。")
+        st.subheader("一括管理（CSV）")
+        with st.expander("CSVでのインポート/エクスポートはこちら", expanded=False):
+            c1, c2 = st.columns(2)
+            uploaded_file = c1.file_uploader("CSVファイル（1行目:ID、2行目:項目説明、3行目～:データ）", type="csv", key="adv_csv_up")
+            if uploaded_file:
+                try:
+                    # まず1行目（列名）を読み取る
+                    uploaded_file.seek(0)  # ファイルポインタをリセット
+                    header_df = pandas_lib.read_csv(uploaded_file, nrows=1, dtype=str)
+                    column_names = header_df.columns.tolist()
+                    
+                    # 3行目からデータを読み込み（skiprows=2で1行目と2行目をスキップ、1行目の列名を使用）
+                    uploaded_file.seek(0)  # ファイルポインタをリセット
+                    df = pandas_lib.read_csv(uploaded_file, skiprows=2, names=column_names, dtype=str, keep_default_na=False).fillna("")
+                    
+                    # content列の存在確認
+                    if 'content' not in df.columns:
+                        st.error("CSVに 'content' 列が見つかりません。アドバイス内容を含む列名を 'content' としてください。")
+                    else:
+                        success_count = 0
+                        duplicate_count = 0
+                        
+                        for _, row in df.iterrows():
+                            content = row['content'].strip()
+                            if content:  # 空でない場合のみ処理
+                                # 既存チェック
+                                existing = execute_query("SELECT id FROM advice_master WHERE content = ?", (content,), fetch="one")
+                                if existing:
+                                    duplicate_count += 1
+                                else:
+                                    if execute_query("INSERT INTO advice_master (content) VALUES (?)", (content,)) is not False:
+                                        success_count += 1
+                        
+                        # 結果メッセージの表示
+                        if success_count > 0:
+                            if duplicate_count > 0:
+                                st.success(f"{success_count}件の新しいアドバイスを追加しました。{duplicate_count}件は既に存在するため重複を回避しました。")
+                            else:
+                                st.success(f"{success_count}件のアドバイスを追加しました。")
+                        elif duplicate_count > 0:
+                            st.warning(f"{duplicate_count}件のアドバイスは既に存在するため、追加されませんでした。")
+                        else:
+                            st.info("有効なアドバイスデータが見つかりませんでした。")
+                            
+                except Exception as e:
+                    st.error(f"CSVの処理中にエラーが発生しました: {e}")
+                    
+            all_advs = execute_query("SELECT content FROM advice_master", fetch="all")
+            if all_advs:
+                df = pandas_lib.DataFrame([dict(r) for r in all_advs])
+                c2.download_button("CSVエクスポート", df.to_csv(index=False).encode('utf-8'), "advice.csv", "text/csv", use_container_width=True)
+        st.markdown("---")
+        st.header("個別管理")
+        with st.form(key="new_advice_form", clear_on_submit=True):
+            new_content = st.text_input("アドバイス内容", placeholder="例：もっと可愛く")
+            if st.form_submit_button("追加する"):
+                if new_content:
+                    if execute_query("INSERT INTO advice_master (content) VALUES (?)", (new_content,)) is not False: st.success("新しいアドバイスを追加しました！")
+                else: st.warning("内容を入力してください。")
+        st.header("登録済みアドバイス一覧")
+        all_advice = execute_query("SELECT id, content FROM advice_master ORDER BY id DESC", fetch="all")
+        if all_advice:
+            for adv in all_advice:
+                with st.expander(f"💡 {adv['content']}", expanded=False):
+                    with st.form(key=f"edit_advice_{adv['id']}"):
+                        # 編集フィールド
+                        new_content = st.text_input("アドバイス内容", value=adv['content'])
+                        
+                        # ボタン
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        update_btn = col_btn1.form_submit_button("更新", type="primary")
+                        delete_btn = col_btn2.form_submit_button("削除")
+                        cancel_btn = col_btn3.form_submit_button("キャンセル")
+                        
+                        if update_btn:
+                            if new_content:
+                                if execute_query("UPDATE advice_master SET content = ? WHERE id = ?", 
+                                               (new_content, adv['id'])) is not False:
+                                    st.success("アドバイスを更新しました！")
+                                    st.rerun()
+                            else:
+                                st.warning("アドバイス内容を入力してください。")
+                        
+                        if delete_btn:
+                            if execute_query("DELETE FROM advice_master WHERE id = ?", (adv['id'],)) is not False:
+                                st.success("アドバイスを削除しました。")
+                                st.rerun()
+        else: 
+            st.info("登録済みのアドバイスはありません。")
+    
     elif page == "指針アドバイス":
         st.title("📋 指針アドバイス管理")
         st.markdown("すべての投稿生成時に参考にするグローバルアドバイスと、カテゴリ別の個別アドバイスを管理します。")
