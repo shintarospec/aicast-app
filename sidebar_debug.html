@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Streamlit Sidebar Debug</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            padding: 20px; 
+            background: #1a1a1a; 
+            color: #00FFFF; 
+        }
+        .debug-info {
+            border: 2px solid #00FFFF;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+        code {
+            background: #2a2a2a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #00CED1;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Streamlit Sidebar Debug Guide</h1>
+    
+    <div class="debug-info">
+        <h2>📋 開発者ツールで確認すべき要素</h2>
+        <ol>
+            <li>ブラウザで<code>F12</code>を押して開発者ツールを開く</li>
+            <li>Elements/要素 タブを開く</li>
+            <li><code>Ctrl+F</code>で以下を検索:</li>
+            <ul>
+                <li><code>collapsedControl</code></li>
+                <li><code>stSidebarCollapseButton</code></li>
+                <li><code>stHeader</code></li>
+            </ul>
+            <li>見つかった要素の:
+                <ul>
+                    <li>display プロパティ</li>
+                    <li>visibility プロパティ</li>
+                    <li>opacity プロパティ</li>
+                    <li>z-index プロパティ</li>
+                    <li>position プロパティ</li>
+                </ul>
+                を確認
+            </li>
+        </ol>
+    </div>
+    
+    <div class="debug-info">
+        <h2>🎯 よくある問題と解決策</h2>
+        
+        <h3>問題1: ボタンが存在するが非表示</h3>
+        <p>症状: DOMには存在するが<code>display: none</code>になっている</p>
+        <p>解決: CSSで<code>!important</code>を使って強制表示</p>
+        
+        <h3>問題2: ボタンが他の要素の下に隠れている</h3>
+        <p>症状: z-indexが低い、または親要素のoverflowで切り取られている</p>
+        <p>解決: <code>z-index: 999999 !important</code>と<code>position: fixed !important</code></p>
+        
+        <h3>問題3: Streamlitバージョンによる挙動の違い</h3>
+        <p>症状: 新しいバージョンでセレクタ名が変更された</p>
+        <p>解決: 複数のセレクタで対応（フォールバック）</p>
+    </div>
+    
+    <div class="debug-info">
+        <h2>🛠️ 診断用JavaScriptコード</h2>
+        <p>ブラウザのコンソールで以下を実行:</p>
+        <pre><code>// サイドバー開閉ボタンを全て検索
+const buttons = document.querySelectorAll('[data-testid*="ollapse"], button[kind="header"]');
+console.log('Found buttons:', buttons.length);
+buttons.forEach((btn, i) => {
+    const styles = window.getComputedStyle(btn);
+    console.log(`Button ${i}:`, {
+        display: styles.display,
+        visibility: styles.visibility,
+        opacity: styles.opacity,
+        zIndex: styles.zIndex,
+        position: styles.position
+    });
+});</code></pre>
+    </div>
+    
+    <div class="debug-info">
+        <h2>💡 現在の対策</h2>
+        <ul>
+            <li>✅ 複数セレクタでフォールバック対応</li>
+            <li>✅ z-index を最大値に設定</li>
+            <li>✅ position: fixed で確実に表示</li>
+            <li>✅ ヘッダー内の全要素を表示</li>
+        </ul>
+    </div>
+</body>
+</html>

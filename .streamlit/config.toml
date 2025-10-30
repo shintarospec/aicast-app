@@ -20,6 +20,6 @@ level = "info"
 # AIcast Room サイバーパンクテーマ
 primaryColor = "#00FFFF"
 backgroundColor = "#000000"
-secondaryBackgroundColor = "#2F4F4F"
+secondaryBackgroundColor = "#000000"
 textColor = "#FFFFFF"
 font = "sans serif"

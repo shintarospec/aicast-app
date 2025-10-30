@@ -9,11 +9,47 @@
 
 /* サイドバー背景を暗く */
 section[data-testid="stSidebar"] {
-	background-color: #0a0a0a !important;
+	background-color: #1a1a1a !important;
 }
 
 section[data-testid="stSidebar"] > div {
-	background-color: #0a0a0a !important;
+	background-color: #1a1a1a !important;
+}
+
+/* option_menu のスタイル（ボタンと統一） */
+nav[class*="nav-link"] {
+	background-color: transparent !important;
+	border-radius: 8px !important;
+	transition: all 0.3s ease !important;
+}
+
+nav[class*="nav-link"]:hover {
+	background: linear-gradient(135deg, #00CED1 0%, #00FFFF 100%) !important;
+	color: #000000 !important;
+	transform: scale(1.02) !important;
+}
+
+div[class*="nav-item"] {
+	background-color: transparent !important;
+	border-radius: 8px !important;
+}
+
+/* streamlit-option-menu のコンテナ */
+div[data-testid="stVerticalBlock"] > div > div {
+	background-color: transparent !important;
+}
+
+/* 選択されたメニューアイテムの背景（シアングラデーション+黒文字） */
+a[class*="active"] {
+	background: linear-gradient(135deg, #00CED1 0%, #00FFFF 100%) !important;
+	color: #000000 !important;
+	font-weight: bold !important;
+	border-radius: 8px !important;
+}
+
+/* 選択されたメニューアイテムのテキストも黒に */
+a[class*="active"] * {
+	color: #000000 !important;
 }
 
 /* タイトルのスタイル（シアン） */
@@ -34,7 +70,7 @@ h3 {
 .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
 	background-color: transparent !important;
 	color: #00CED1 !important;
-	border-bottom: 3px solid #00CED1 !important;
+	border-bottom: 1px solid #00CED1 !important;
 	font-weight: bold !important;
 }
 
@@ -85,29 +121,65 @@ div[data-baseweb="popover"] li:hover {
 	color: #000000 !important;
 }
 
-/* ボタンのスタイル（視認性向上 - 濃いバージョン） */
+/* ボタンのスタイル（ログインページと統一 - サイバーパンク調） */
 .stButton > button {
-	background-color: #008B8B !important;
-	color: #FFFFFF !important;
-	border: 1px solid #00CED1 !important;
+	background: linear-gradient(135deg, #00CED1 0%, #00FFFF 100%) !important;
+	color: #000000 !important;
+	border: none !important;
+	border-radius: 8px !important;
 	font-weight: bold !important;
+	font-size: 16px !important;
+	padding: 10px 24px !important;
+	transition: all 0.3s ease !important;
 }
 
 .stButton > button:hover {
-	background-color: #00CED1 !important;
-	color: #000000 !important;
-	border: 1px solid #00FFFF !important;
+	transform: scale(1.05) !important;
+	box-shadow: 0 0 40px rgba(0, 255, 255, 1), 0 0 60px rgba(0, 255, 255, 0.8), 0 0 80px rgba(0, 255, 255, 0.5) !important;
 }
 
-/* プライマリボタン（シアン系） */
+/* プライマリボタン（より強い光） */
 .stButton > button[kind="primary"] {
-	background-color: #00CED1 !important;
+	background: linear-gradient(135deg, #00FFFF 0%, #00CED1 100%) !important;
 	color: #000000 !important;
-	border: 1px solid #00FFFF !important;
+	border: none !important;
+	border-radius: 8px !important;
 	font-weight: bold !important;
+	font-size: 16px !important;
+	padding: 10px 24px !important;
+	transition: all 0.3s ease !important;
 }
 
 .stButton > button[kind="primary"]:hover {
-	background-color: #00FFFF !important;
+	transform: scale(1.05) !important;
+	box-shadow: 0 0 50px rgba(0, 255, 255, 1), 0 0 70px rgba(0, 255, 255, 0.9), 0 0 90px rgba(0, 255, 255, 0.6) !important;
+}
+
+/* フォーム送信ボタン（form_submit_button）のスタイル - 強力な上書き */
+button[kind="primary"],
+button[data-testid="baseButton-primary"],
+.stForm button[type="submit"],
+.stForm button,
+form button[type="submit"],
+div[data-testid="stForm"] button {
+	background: linear-gradient(135deg, #00FFFF 0%, #00CED1 100%) !important;
+	background-color: transparent !important;
 	color: #000000 !important;
+	border: none !important;
+	border-radius: 8px !important;
+	font-weight: bold !important;
+	font-size: 16px !important;
+	padding: 10px 24px !important;
+	transition: all 0.3s ease !important;
+}
+
+button[kind="primary"]:hover,
+button[data-testid="baseButton-primary"]:hover,
+.stForm button[type="submit"]:hover,
+.stForm button:hover,
+form button[type="submit"]:hover,
+div[data-testid="stForm"] button:hover {
+	transform: scale(1.05) !important;
+	box-shadow: 0 0 50px rgba(0, 255, 255, 1), 0 0 70px rgba(0, 255, 255, 0.9), 0 0 90px rgba(0, 255, 255, 0.6) !important;
+	background: linear-gradient(135deg, #00FFFF 0%, #00CED1 100%) !important;
 }

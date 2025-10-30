@@ -123,17 +123,64 @@ def check_password():
     
     # 認証画面の表示
     st.markdown("""
+    <style>
+    @keyframes glow {
+        0%, 100% { box-shadow: 0 0 30px rgba(0, 255, 255, 0.6), inset 0 0 25px rgba(0, 255, 255, 0.15); }
+        50% { box-shadow: 0 0 45px rgba(0, 255, 255, 0.9), inset 0 0 35px rgba(0, 255, 255, 0.25); }
+    }
+    @keyframes textGlow {
+        0%, 100% { text-shadow: 0 0 15px rgba(0, 255, 255, 0.9), 0 0 30px rgba(0, 255, 255, 0.6), 0 0 45px rgba(0, 255, 255, 0.3); }
+        50% { text-shadow: 0 0 25px rgba(0, 255, 255, 1), 0 0 40px rgba(0, 255, 255, 0.9), 0 0 60px rgba(0, 255, 255, 0.5); }
+    }
+    </style>
     <div style="max-width: 400px; margin: 100px auto; padding: 30px; 
-                border-radius: 10px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-        <h1 style="color: white; text-align: center; margin-bottom: 30px;">
-            🌟 AIcast Room
+                border-radius: 10px; 
+                border: 2px solid #00FFFF;
+                background: rgba(0, 0, 0, 0.85);
+                animation: glow 2s ease-in-out infinite;">
+        <h1 style="color: #00FFFF; text-align: center; margin-bottom: 30px;
+                   animation: textGlow 2s ease-in-out infinite;">
+            AIcast Room
         </h1>
-        <p style="color: white; text-align: center; margin-bottom: 30px;">
+        <p style="color: #00CED1; text-align: center; margin-bottom: 30px;">
             キャスト管理・AI投稿システム<br>
-            <small>認証が必要です</small>
+            <small style="color: #888;">🔐 認証が必要です</small>
         </p>
     </div>
+    """, unsafe_allow_html=True)
+    
+    # サイバーパンク調のカスタムCSS
+    st.markdown("""
+    <style>
+    /* パスワード入力欄のスタイル */
+    .stTextInput > div > div > input {
+        background-color: #1a1a2e !important;
+        border: 2px solid #00CED1 !important;
+        border-radius: 8px !important;
+        color: #00FFFF !important;
+        font-size: 16px !important;
+        padding: 12px !important;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #00FFFF !important;
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.5) !important;
+    }
+    /* ログインボタンのスタイル */
+    .stButton > button {
+        background: linear-gradient(135deg, #00CED1 0%, #00FFFF 100%) !important;
+        color: #000000 !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        font-size: 18px !important;
+        padding: 10px 24px !important;
+        transition: all 0.3s ease !important;
+    }
+    .stButton > button:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 40px rgba(0, 255, 255, 1), 0 0 60px rgba(0, 255, 255, 0.8), 0 0 80px rgba(0, 255, 255, 0.5) !important;
+    }
+    </style>
     """, unsafe_allow_html=True)
     
     # パスワード入力フォーム

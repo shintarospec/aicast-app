@@ -25,6 +25,7 @@
 2. **🔑 [X API実装ガイド](./docs/X_API_IMPLEMENTATION_GUIDE.md)** - 核心技術の習得
 3. **☁️ [GCP実装ガイド](./docs/MINIMAL_GCP_IMPLEMENTATION.md)** - 環境構築
 4. **🆕 [新プロンプト構造仕様](./directories/docs/NEW_PROMPT_STRUCTURE.md)** - 2025年10月の大規模リファクタリング ★NEW
+5. **🎨 [スタイル仕様書](./STYLE_SPECIFICATION.md)** - サイバーパンク調UIデザインガイド ★NEW
 
 ---
 

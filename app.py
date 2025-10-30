@@ -1797,7 +1797,7 @@ def display_retweet_schedules(cast_id=None):
                             st.rerun()
                     
                     with col4:
-                        if st.button(f"⚡ 今すぐ実行", key=f"execute_now_{retweet['id']}"):
+                        if st.button(f"⚡ 今すぐ実行", key=f"execute_now_{retweet['id']}", type="primary"):
                             execute_retweet_now(retweet)
                             st.rerun()
                 
@@ -1865,7 +1865,7 @@ def display_retweet_schedules(cast_id=None):
                                         placeholder="このツイートについてのコメントを入力...",
                                         key=f"quote_comment_{retweet['id']}"
                                     )
-                                    if st.form_submit_button("🔄 引用ツイートとして再作成"):
+                                    if st.form_submit_button("🔄 引用ツイートとして再作成", type="primary"):
                                         if quote_comment.strip():
                                             # 元の予約を削除して新しい引用ツイート予約を作成
                                             delete_retweet_schedule(retweet['id'])
@@ -2636,7 +2636,23 @@ def main():
                 
             st.session_state.gemini_model = None
 
-    st.sidebar.title("AIcast room")
+    # サイドバーロゴ（ログインページと統一されたシアン系デザイン - 強化版）
+    st.sidebar.markdown("""
+    <style>
+    @keyframes logoGlow {
+        0%, 100% { text-shadow: 0 0 20px rgba(0, 255, 255, 1), 0 0 40px rgba(0, 255, 255, 0.8), 0 0 60px rgba(0, 255, 255, 0.5); }
+        50% { text-shadow: 0 0 30px rgba(0, 255, 255, 1), 0 0 50px rgba(0, 255, 255, 1), 0 0 80px rgba(0, 255, 255, 0.8); }
+    }
+    </style>
+    <div style="padding: 15px 0; margin-bottom: 20px; text-align: center; border-bottom: 2px solid #00FFFF;">
+        <h1 style="color: #00FFFF; font-size: 1.8em; margin: 0; animation: logoGlow 3s ease-in-out infinite;">
+            AIcast Room
+        </h1>
+        <p style="color: #00CED1; font-size: 0.9em; margin: 5px 0 0 0;">
+            AI Cast Management
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # メニューの選択肢（タイトルと統一した絵文字）
     menu_options = ["📝 投稿管理", "🎨 AI画像投稿", "👤 キャスト管理", "💡 アドバイス管理", "📋 指針アドバイス", "⚙️ システム設定"]
@@ -2662,23 +2678,38 @@ def main():
         
     # サイドバーメニュー（option_menuスタイル）
     with st.sidebar:
+        # メニュータイトルを subheader と同じスタイルで表示
+        st.markdown("""
+            <h3 style="color: #00CED1; font-weight: 600; margin-bottom: 0.3rem; margin-top: 0.5rem;">
+                📋 メニュー
+            </h3>
+        """, unsafe_allow_html=True)
+        
         selected_page = option_menu(
-            menu_title="メニュー",
+            menu_title=None,
             options=menu_options,
-            icons=[],  # 絵文字を使用
-            menu_icon="list-columns-reverse",
+            icons=[],
+            menu_icon=None,
             default_index=default_index,
             key="main_navigation",
             styles={
-                "container": {"padding": "5px", "background-color": "#000000"},
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "icon": {"color": "#00FFFF", "font-size": "18px"},
                 "nav-link": {
-                    "font-size": "14px",
+                    "font-size": "16px",
                     "text-align": "left",
-                    "margin": "0px",
-                    "--hover-color": "#2F4F4F",
-                    "color": "#00CED1"
+                    "margin": "5px",
+                    "padding": "10px 15px",
+                    "border-radius": "8px",
+                    "color": "#FFFFFF",
+                    "background-color": "transparent",
+                    "transition": "all 0.3s ease"
                 },
-                "nav-link-selected": {"background-color": "#00CED1", "color": "#000000"},
+                "nav-link-selected": {
+                    "background": "linear-gradient(135deg, #00CED1 0%, #00FFFF 100%)",
+                    "color": "#000000",
+                    "border-radius": "8px"
+                },
             }
         )
     
@@ -3673,13 +3704,13 @@ def main():
                                 st.write(post['content'])
                             
                             with col_tune:
-                                st.button("チューニング", key=f"edit_{post_id}", on_click=set_editing_post, args=(post_id,), use_container_width=True)
+                                st.button("🔧 調整", key=f"edit_{post_id}", on_click=set_editing_post, args=(post_id,), use_container_width=True)
                             
                             with col_approve:
-                                st.button("承認", type="primary", key=f"quick_approve_{post_id}", on_click=quick_approve, args=(post_id,), use_container_width=True)
+                                st.button("✅ 承認", type="primary", key=f"quick_approve_{post_id}", on_click=quick_approve, args=(post_id,), use_container_width=True)
                             
                             with col_reject:
-                                st.button("却下", key=f"quick_reject_{post_id}", on_click=quick_reject, args=(post_id,), use_container_width=True)
+                                st.button("❌ 却下", key=f"quick_reject_{post_id}", on_click=quick_reject, args=(post_id,), use_container_width=True)
                             
                             st.markdown("---")
                 else: 
