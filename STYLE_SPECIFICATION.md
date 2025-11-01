@@ -233,3 +233,68 @@ font = "sans serif"
 - 全ボタンにサイバーパンク調デザイン適用
 - 投稿案ボタンに絵文字追加（調整/承認/却下）
 - `config.toml`の`secondaryBackgroundColor`を黒に変更（シアン漏れ対策）
+
+### 2025-11-01（最終完了版）
+- **option_menuスタイル最終調整**:
+  - メニューボックス: 黒背景 + 15px角丸をapp.py内で直接指定
+  - 選択時のフォントカラー: 黒文字で視認性向上
+  - 外部CSS（style.css）では効果なしと判明 → app.py内stylesパラメータで対応
+- **フォーム背景色の最適化**:
+  - `config.toml`の`secondaryBackgroundColor`を`#1a1a1a`に変更
+  - フォームの枠線が視認可能になり、ユーザビリティ向上
+- **技術的教訓**:
+  - streamlit-option-menuは外部CSSセレクタが効きにくい仕様
+  - app.py内stylesパラメータでの直接指定が確実
+  - config.toml secondaryBackgroundColorはフォーム・ウィジェット背景に影響
+
+---
+
+## option_menuスタイル詳細（最終版）
+
+### コンテナ（メニューボックス）
+```python
+"container": {
+    "padding": "0.5rem",
+    "background-color": "#000000",
+    "border-radius": "15px"
+}
+```
+
+### 選択時のメニュー項目
+```python
+"nav-link-selected": {
+    "color": "#000000"  # 黒文字（シアングラデーション背景とのコントラスト）
+}
+```
+
+### スタイル適用場所
+- **ファイル**: `app.py` (2689-2703行目)
+- **関数**: `main()`内のサイドバーメニュー定義
+- **理由**: style.cssでの外部指定は効果なし。app.py内で直接指定が必須。
+
+---
+
+## トラブルシューティング追記
+
+### option_menuが表示されない / メインカラムに移動してしまう
+**原因**: `with st.sidebar:`ブロックのインデントが正しくない
+
+**解決策**:
+```python
+with st.sidebar:
+    st.markdown("...")  # 正しくインデント
+    
+    selected_page = option_menu(...)  # option_menuもwith内に配置
+```
+
+### option_menuのスタイルが反映されない
+**原因**: 外部CSS（style.css）のセレクタが効かない仕様
+
+**解決策**: app.py内のstylesパラメータで直接指定する（現在の実装参照）
+
+### フォームの枠線が見えない
+**原因**: `secondaryBackgroundColor`が`#000000`（黒）で、背景と同化
+
+**解決策**: `secondaryBackgroundColor = "#1a1a1a"`に変更（現在の設定）
+
+````
