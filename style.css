@@ -183,3 +183,11 @@ div[data-testid="stForm"] button:hover {
 	box-shadow: 0 0 50px rgba(0, 255, 255, 1), 0 0 70px rgba(0, 255, 255, 0.9), 0 0 90px rgba(0, 255, 255, 0.6) !important;
 	background: linear-gradient(135deg, #00FFFF 0%, #00CED1 100%) !important;
 }
+
+/* option_menu のコンテナに角丸と黒背景を追加 */
+nav[data-testid="stSidebarNav"] > div,
+section[data-testid="stSidebar"] nav > div {
+	background-color: #000000 !important;
+	border-radius: 8px !important;
+	padding: 0.5rem !important;
+}

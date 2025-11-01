@@ -2682,8 +2682,8 @@ def main():
         st.markdown("""
             <h3 style="color: #00CED1; font-weight: 600; margin-bottom: 0.3rem; margin-top: 0.5rem;">
                 📋 メニュー
-            </h3>
-        """, unsafe_allow_html=True)
+        </h3>
+    """, unsafe_allow_html=True)
         
         selected_page = option_menu(
             menu_title=None,
@@ -2693,23 +2693,14 @@ def main():
             default_index=default_index,
             key="main_navigation",
             styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "#00FFFF", "font-size": "18px"},
-                "nav-link": {
-                    "font-size": "16px",
-                    "text-align": "left",
-                    "margin": "5px",
-                    "padding": "10px 15px",
-                    "border-radius": "8px",
-                    "color": "#FFFFFF",
-                    "background-color": "transparent",
-                    "transition": "all 0.3s ease"
+                "container": {
+                    "padding": "0.5rem",
+                    "background-color": "#000000",
+                    "border-radius": "15px"
                 },
                 "nav-link-selected": {
-                    "background": "linear-gradient(135deg, #00CED1 0%, #00FFFF 100%)",
-                    "color": "#000000",
-                    "border-radius": "8px"
-                },
+                    "color": "#000000"
+                }
             }
         )
     
