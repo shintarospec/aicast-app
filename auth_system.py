@@ -155,15 +155,16 @@ def check_password():
     /* パスワード入力欄のスタイル */
     .stTextInput > div > div > input {
         background-color: #1a1a2e !important;
-        border: 2px solid #00CED1 !important;
+        border: none !important;
         border-radius: 8px !important;
         color: #00FFFF !important;
         font-size: 16px !important;
         padding: 12px !important;
     }
     .stTextInput > div > div > input:focus {
-        border-color: #00FFFF !important;
-        box-shadow: 0 0 15px rgba(0, 255, 255, 0.5) !important;
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
     }
     /* ログインボタンのスタイル */
     .stButton > button {

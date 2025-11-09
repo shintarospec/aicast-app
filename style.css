@@ -87,23 +87,118 @@ h3 {
 /* プルダウンメニューのスタイル */
 .stSelectbox > div > div[data-baseweb="select"] > div {
 	background-color: #2F4F4F !important;
-	border: 1px solid #00CED1 !important;
+	border: none !important;
 	border-radius: 6px !important;
-	color: #00CED1 !important;
+	color: #FFFFFF !important;
 }
 
 .stMultiSelect > div > div[data-baseweb="select"] > div {
 	background-color: #2F4F4F !important;
-	border: 1px solid #00CED1 !important;
+	border: none !important;
 	border-radius: 6px !important;
-	color: #00CED1 !important;
+	color: #FFFFFF !important;
+}
+
+/* テキスト入力フィールド（Text Input + Password）のスタイル */
+.stTextInput > div > div > input,
+input[type="password"] {
+	background-color: #2F4F4F !important;
+	border: none !important;
+	border-radius: 6px !important;
+	color: #FFFFFF !important;
+	padding: 10px !important;
+}
+
+.stTextInput > div > div > input:focus,
+input[type="password"]:focus {
+	border: 1px solid #00CED1 !important;
+	box-shadow: 0 0 8px rgba(0, 206, 209, 0.3) !important;
+	outline: none !important;
+}
+
+/* テキスト入力のラベル */
+.stTextInput > label {
+	color: #FFFFFF !important;
+}
+
+/* テキストエリア（Text Area）のスタイル */
+.stTextArea > div > div > textarea {
+	background-color: #2F4F4F !important;
+	border: none !important;
+	border-radius: 6px !important;
+	color: #FFFFFF !important;
+	padding: 10px !important;
+}
+
+.stTextArea > div > div > textarea:focus {
+	border: 1px solid #00CED1 !important;
+	box-shadow: 0 0 8px rgba(0, 206, 209, 0.3) !important;
+	outline: none !important;
+}
+
+/* テキストエリアのラベル */
+.stTextArea > label {
+	color: #FFFFFF !important;
+}
+
+/* 数値入力（Number Input）のスタイル - 外側コンテナ */
+/* 外側のコンテナのスタイル */
+.stNumberInput > div > div,
+.stNumberInput > div,
+div[data-baseweb="input"],
+[data-testid="stNumberInput"] > div > div {
+	border: none !important;
+	border-radius: 6px !important;
+	background-color: transparent !important;
+}
+
+/* input要素本体のスタイル */
+.stNumberInput > div > div > input,
+.stNumberInput input[type="number"],
+div[data-baseweb="input"] input[type="number"],
+.stNumberInput div[data-baseweb="input"] > input,
+[data-testid="stNumberInput"] input,
+div[class*="NumberInput"] input {
+	background-color: #2F4F4F !important;
+	border: none !important;
+	border-radius: 6px !important;
+	color: #FFFFFF !important;
+	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* フォーカス時も枠線なし */
+.stNumberInput:focus-within > div > div,
+.stNumberInput:focus-within > div,
+div[data-baseweb="input"]:focus-within,
+[data-testid="stNumberInput"]:focus-within > div > div {
+	border: none !important;
+	box-shadow: none !important;
+}
+
+.stNumberInput > div > div > input:focus,
+.stNumberInput input[type="number"]:focus,
+div[data-baseweb="input"] input[type="number"]:focus,
+.stNumberInput div[data-baseweb="input"] > input:focus,
+[data-testid="stNumberInput"] input:focus,
+div[class*="NumberInput"] input:focus {
+	border: none !important;
+	box-shadow: none !important;
+	background-color: #2F4F4F !important;
+	outline: none !important;
+}
+
+/* 数値入力のラベル */
+.stNumberInput > label,
+div[class*="stNumberInput"] label {
+	color: #FFFFFF !important;
 }
 
 /* プルダウンの選択肢部分 */
 div[data-baseweb="popover"] {
-	border: 1px solid #00CED1 !important;
+	border: none !important;
 	border-radius: 6px !important;
-	box-shadow: 0 4px 12px rgba(0, 255, 255, 0.3) !important;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
 div[data-baseweb="popover"] ul {
@@ -113,11 +208,11 @@ div[data-baseweb="popover"] ul {
 
 div[data-baseweb="popover"] li {
 	background-color: #2F4F4F !important;
-	color: #00CED1 !important;
+	color: #FFFFFF !important;
 }
 
 div[data-baseweb="popover"] li:hover {
-	background-color: #00FFFF !important;
+	background-color: #00CED1 !important;
 	color: #000000 !important;
 }
 
@@ -182,12 +277,47 @@ div[data-testid="stForm"] button:hover {
 	transform: scale(1.05) !important;
 	box-shadow: 0 0 50px rgba(0, 255, 255, 1), 0 0 70px rgba(0, 255, 255, 0.9), 0 0 90px rgba(0, 255, 255, 0.6) !important;
 	background: linear-gradient(135deg, #00FFFF 0%, #00CED1 100%) !important;
+}B
+
+/* 数値入力の増減ボタンには枠線を表示しない */
+.stNumberInput button,
+button[kind="stepperButton"] {
+	border: none !important;
+	background-color: transparent !important;
 }
 
-/* option_menu のコンテナに角丸と黒背景を追加 */
-nav[data-testid="stSidebarNav"] > div,
-section[data-testid="stSidebar"] nav > div {
-	background-color: #000000 !important;
-	border-radius: 8px !important;
-	padding: 0.5rem !important;
+/* 数値入力の増減ボタン（+ -）をシアン背景にする */
+.stNumberInput button,
+button[data-testid*="StepButton"],
+div[data-baseweb="input"] button {
+	background-color: #00CED1 !important;
+	color: #000000 !important;
+	border: none !important;
+	border-radius: 0 !important;
+	padding: 10px 15px !important;
+	font-weight: bold !important;
+	transition: all 0.2s ease !important;
+	margin: 0 !important;
+	min-width: 40px !important;
+	height: 100% !important;
 }
+
+/* 最初のボタン（-）は左側の角丸なし */
+.stNumberInput button:first-of-type,
+button[data-testid*="StepButton"]:first-of-type {
+	border-radius: 0 !important;
+}
+
+/* 最後のボタン（+）は右側を角丸に */
+.stNumberInput button:last-of-type,
+button[data-testid*="StepButton"]:last-of-type {
+	border-radius: 0 5px 5px 0 !important;
+}
+
+.stNumberInput button:hover,
+button[data-testid*="StepButton"]:hover,
+div[data-baseweb="input"] button:hover {
+	background-color: #00FFFF !important;
+	transform: scale(1.05) !important;
+}
+
