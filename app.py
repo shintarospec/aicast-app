@@ -2682,8 +2682,8 @@ def main():
         st.markdown("""
             <h3 style="color: #00CED1; font-weight: 600; margin-bottom: 0.3rem; margin-top: 0.5rem;">
                 📋 メニュー
-        </h3>
-    """, unsafe_allow_html=True)
+            </h3>
+        """, unsafe_allow_html=True)
         
         selected_page = option_menu(
             menu_title=None,
@@ -2693,14 +2693,23 @@ def main():
             default_index=default_index,
             key="main_navigation",
             styles={
-                "container": {
-                    "padding": "0.5rem",
-                    "background-color": "#000000",
-                    "border-radius": "15px"
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "icon": {"color": "#00FFFF", "font-size": "18px"},
+                "nav-link": {
+                    "font-size": "16px",
+                    "text-align": "left",
+                    "margin": "5px",
+                    "padding": "10px 15px",
+                    "border-radius": "8px",
+                    "color": "#FFFFFF",
+                    "background-color": "transparent",
+                    "transition": "all 0.3s ease"
                 },
                 "nav-link-selected": {
-                    "color": "#000000"
-                }
+                    "background": "linear-gradient(135deg, #00CED1 0%, #00FFFF 100%)",
+                    "color": "#000000",
+                    "border-radius": "8px"
+                },
             }
         )
     
@@ -3710,6 +3719,7 @@ def main():
             with tab2:
                 st.subheader("✅ 承認済み")
                 approved_posts = execute_query("SELECT * FROM posts WHERE cast_id = ? AND status = 'approved' AND (sent_status = 'not_sent' OR sent_status IS NULL) ORDER BY posted_at DESC", (selected_cast_id,), fetch="all")
+                
                 if approved_posts:
                     st.info(f"{len(approved_posts)}件の承認済み投稿があります。")
                     
@@ -3916,349 +3926,201 @@ def main():
                     
                     st.markdown("---")
                     
-                    # 全選択/全解除ボタン
-                    col_select1, col_select2, col_select3 = st.columns([1,1,4])
-                    with col_select1:
-                        if st.button("🔲 全選択", key="approved_select_all", use_container_width=True):
-                            for post in approved_posts:
-                                st.session_state[f'select_approved_{post["id"]}'] = True
-                            st.rerun()
+                    # テーブル形式で表示
+                    import pandas as pd
                     
-                    with col_select2:
-                        if st.button("☐ 全解除", key="approved_deselect_all", use_container_width=True):
-                            for post in approved_posts:
-                                st.session_state[f'select_approved_{post["id"]}'] = False
-                            st.rerun()
+                    # セッション状態の初期化（選択状態を保持するため）
+                    if 'approved_selections' not in st.session_state:
+                        st.session_state.approved_selections = {}
                     
-                    # 投稿一覧表示
+                    # DataFrameの作成（毎回データベースから最新データを取得）
+                    table_data = []
                     for post in approved_posts:
-                        with st.container():
-                            col_check, col_content, col_datetime, col_action = st.columns([0.5, 2.5, 1, 1])
+                        # 送信日時の取得（優先順位: scheduled_at > posted_at > created_at）
+                        if post['scheduled_at']:
+                            dt = safe_datetime_parse(post['scheduled_at'])
+                        elif post['posted_at']:
+                            dt = safe_datetime_parse(post['posted_at'])
+                        else:
+                            dt = safe_datetime_parse(post['created_at'])
+                        
+                        # 状態アイコン
+                        status_icon = "📅" if post['sent_status'] == 'scheduled' else "✅"
+                        
+                        # 選択状態: session_stateに保存されていればそれを使用、なければデフォルトTrue
+                        post_id = post['id']
+                        selection = st.session_state.approved_selections.get(post_id, True)
+                        
+                        table_data.append({
+                            "ID": post_id,
+                            "状態": status_icon,
+                            "送信日": dt.date() if dt else datetime.date.today(),
+                            "送信時刻": dt.time() if dt else datetime.time(0, 0),
+                            "内容": post['content'][:50] + "..." if len(post['content']) > 50 else post['content'],
+                            "評価": post['evaluation'] or "",
+                            "選択": selection
+                        })
+                    
+                    df = pd.DataFrame(table_data)
+                    
+                    # テーブルエディタ（編集内容は画面上のみ、保存ボタンで初めてDBに反映）
+                    st.info("💡 送信日・送信時刻をクリックして編集できます。編集後は必ず「💾 時刻変更を保存」を押してください。")
+                    
+                    edited_df = st.data_editor(
+                        df,
+                        column_config={
+                            "ID": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                            "状態": st.column_config.TextColumn("状態", disabled=True, width="small"),
+                            "送信日": st.column_config.DateColumn(
+                                "送信日",
+                                min_value=datetime.date.today(),
+                                format="YYYY-MM-DD",
+                                width="medium"
+                            ),
+                            "送信時刻": st.column_config.TimeColumn(
+                                "送信時刻",
+                                format="HH:mm",
+                                width="small"
+                            ),
+                            "内容": st.column_config.TextColumn("内容", disabled=True, width="large"),
+                            "評価": st.column_config.TextColumn("評価", disabled=True, width="small"),
+                            "選択": st.column_config.CheckboxColumn("選択", width="small")
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        num_rows="fixed",  # 行の追加・削除を禁止
+                        disabled=["ID", "状態", "内容", "評価"],  # 編集不可列を明示的に指定
+                        key="approved_table"  # ユニークなキーで状態を保持
+                    )
+                    
+                    # 選択状態をsession_stateに保存（ボタンクリック後も保持するため）
+                    for idx, row in edited_df.iterrows():
+                        st.session_state.approved_selections[row['ID']] = row['選択']
+                    
+                    # ヒントメッセージ
+                    st.info("💡 すべての投稿がデフォルトで選択されています。不要な投稿は「選択」列のチェックを外してください")
+                    
+                    # アクションボタン
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("💾 時刻変更を保存", type="primary", use_container_width=True):
+                            save_count = 0
+                            for idx, row in edited_df.iterrows():
+                                post_id = row['ID']
+                                new_date = row['送信日']
+                                new_time = row['送信時刻']
+                                
+                                # datetimeオブジェクトに変換
+                                scheduled_datetime = datetime.datetime.combine(new_date, new_time)
+                                
+                                # 過去時刻チェック
+                                if scheduled_datetime <= datetime.datetime.now():
+                                    st.warning(f"⚠️ ID {post_id}: 過去の時刻は設定できません")
+                                    continue
+                                
+                                try:
+                                    execute_query(
+                                        "UPDATE posts SET scheduled_at = ? WHERE id = ?",
+                                        (scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), post_id)
+                                    )
+                                    save_count += 1
+                                except Exception as e:
+                                    st.error(f"ID {post_id} の保存エラー: {str(e)}")
                             
-                            with col_check:
-                                st.checkbox("選択", key=f"select_approved_{post['id']}", label_visibility="collapsed")
-                            with col_content:
-                                full_advice_list = []; 
-                                if post['advice']: full_advice_list.extend(post['advice'].split(','))
-                                if post['free_advice']: full_advice_list.append(post['free_advice'])
-                                full_advice_str = ", ".join(full_advice_list)
-                                
-                                # スケジュール情報の表示
-                                scheduled_time = datetime.datetime.strptime(post['created_at'], '%Y-%m-%d %H:%M:%S')
-                                scheduled_display = scheduled_time.strftime('%H:%M')
-                                
-                                # スケジュール状態の確認
-                                status_info = ""
-                                if post['scheduled_at']:
-                                    scheduled_at = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
-                                    if post['sent_status'] == 'scheduled':
-                                        status_info = f" | 📅 スケジュール済み: {scheduled_at.strftime('%m-%d %H:%M')}"
-                                    else:
-                                        status_info = f" | 📅 予定: {scheduled_at.strftime('%m-%d %H:%M')}"
-                                
-                                if post['generated_at']:
-                                    actual_generated_time = safe_datetime_parse(post['generated_at'])
-                                    if actual_generated_time:
-                                        actual_display = actual_generated_time.strftime('%m-%d %H:%M')
-                                        # 承認日時から日付のみを取得
-                                        approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
-                                        st.caption(f"⏰ 作成: {actual_display} | 🕐 投稿予定: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
-                                    else:
-                                        # 承認日時から日付のみを取得
-                                        approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
-                                        st.caption(f"⏰ 作成: エラー | 🕐 投稿予定: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
-                                else:
-                                    # 古いデータ（generated_atがない場合）
-                                    # 承認日時から日付のみを取得
-                                    approval_date_only = safe_datetime_parse(post['posted_at']).strftime('%Y-%m-%d') if post['posted_at'] else "不明"
-                                    st.caption(f"🕐 生成時刻: {scheduled_display} | 承認日: {approval_date_only} | 評価: {post['evaluation']} | アドバイス: {full_advice_str}{status_info}")
-                                
-                                # スケジュール状態に応じたアイコン表示
-                                if post['sent_status'] == 'scheduled':
-                                    st.info(post['content'], icon="📅")
-                                else:
-                                    st.success(post['content'], icon="✔")
+                            if save_count > 0:
+                                st.success(f"✅ {save_count}件の時刻を保存しました")
+                            else:
+                                st.warning("保存する変更がありませんでした")
+                    
+                    with col2:
+                        if st.button("📅 選択した投稿を予約", use_container_width=True):
+                            # edited_dfの最新状態を使用
+                            selected_posts = edited_df[edited_df['選択'] == True].copy()
                             
-                            with col_datetime:
-                                # 投稿時刻の取得（スケジュール投稿がある場合は scheduled_at を優先）
-                                if post['scheduled_at'] and post['sent_status'] == 'scheduled':
-                                    # スケジュール投稿として保存されている場合
-                                    current_scheduled_datetime = safe_datetime_parse(post['scheduled_at'])
-                                    original_datetime = current_scheduled_datetime
-                                    created_at_dt = safe_datetime_parse(post['created_at'])
-                                    created_at_str = created_at_dt.strftime('%H:%M') if created_at_dt else 'N/A'
-                                    st.caption(f"📅 スケジュール時刻: {current_scheduled_datetime.strftime('%m-%d %H:%M')} | 🕒 元の投稿時刻: {created_at_str}")
-                                else:
-                                    # 通常の投稿または未スケジュール
-                                    original_datetime = safe_datetime_parse(post['created_at'])
-                                    st.caption(f"🕒 元の投稿時刻: {original_datetime.strftime('%H:%M')}")
-                                
-                                # シンプルな時刻設定UI
-                                
-                                # 現在時刻の取得と適切な初期値設定
-                                now = datetime.datetime.now(JST)
-                                today = datetime.date.today()
-                                
-                                # 時刻取得の優先順位（scheduled_at > posted_at > created_at）
-                                # 安全な日時取得（優先順位: scheduled_at > posted_at > created_at）
-                                
-                                if post['scheduled_at']:
-                                    parsed_dt = safe_datetime_parse(post['scheduled_at'])
-                                    if parsed_dt:
-                                        current_datetime = parsed_dt
-                                        st.info("📅 保存済み予約時刻を表示中")
-                                elif post['posted_at']:
-                                    parsed_dt = safe_datetime_parse(post['posted_at'])
-                                    if parsed_dt:
-                                        current_datetime = parsed_dt
-                                        st.info("🕐 承認時刻を表示中")
-                                else:
-                                    parsed_dt = safe_datetime_parse(post['created_at'])
-                                    if parsed_dt:
-                                        current_datetime = parsed_dt
-                                        st.info("� 作成時刻を表示中")
-                                
-                                # パースに失敗した場合は現在時刻 + 10分を初期値に
-                                if not current_datetime:
-                                    current_datetime = datetime.datetime.now() + datetime.timedelta(minutes=10)
-                                    st.warning("⚠️ 保存済み時刻の取得に失敗しました。現在時刻を初期値にします。")
-                                
-                                # 過去の投稿の場合は現在時刻を初期値に
-                                if current_datetime.date() < today:
-                                    initial_date = today
-                                    initial_hour = now.hour
-                                    initial_minute = now.minute
-                                    st.warning("⚠️ 過去の投稿のため、現在時刻を初期値として設定しています")
-                                else:
-                                    initial_date = current_datetime.date()
-                                    initial_hour = current_datetime.hour
-                                    initial_minute = current_datetime.minute
-                                
-                                # 日付選択
-                                send_date = st.date_input(
-                                    "📅 送信日",
-                                    value=initial_date,
-                                    min_value=today,
-                                    key=f"send_date_{post['id']}"
-                                )
-                                
-                                # 時刻入力方式の選択
-                                time_input_method = st.radio(
-                                    "時刻入力方式",
-                                    ["🔢 数値入力（1分単位）", "📋 プルダウン選択（5分刻み）"],
-                                    key=f"time_method_{post['id']}",
-                                    horizontal=True
-                                )
-                                
-                                if time_input_method == "🔢 数値入力（1分単位）":
-                                    # 数値入力による1分単位設定
-                                    col_hour, col_min = st.columns(2)
-                                    with col_hour:
-                                        send_hour = st.number_input(
-                                            "時（0-23）",
-                                            min_value=0,
-                                            max_value=23,
-                                            value=initial_hour,
-                                            key=f"hour_num_{post['id']}"
-                                        )
-                                    with col_min:
-                                        send_minute = st.number_input(
-                                            "分（0-59）",
-                                            min_value=0,
-                                            max_value=59,
-                                            value=initial_minute,
-                                            key=f"minute_num_{post['id']}"
-                                        )
-                                else:
-                                    # プルダウン選択による5分刻み設定
-                                    col_hour, col_min = st.columns(2)
-                                    with col_hour:
-                                        hour_options = list(range(24))
-                                        hour_labels = [f"{h:02d}時" for h in hour_options]
-                                        selected_hour_label = st.selectbox(
-                                            "時",
-                                            options=hour_labels,
-                                            index=initial_hour,
-                                            key=f"hour_select_{post['id']}"
-                                        )
-                                        send_hour = hour_options[hour_labels.index(selected_hour_label)]
+                            if len(selected_posts) == 0:
+                                st.warning("予約する投稿を選択してください")
+                            else:
+                                scheduled_count = 0
+                                for idx, row in selected_posts.iterrows():
+                                    post_id = row['ID']
+                                    scheduled_date = row['送信日']
+                                    scheduled_time = row['送信時刻']
                                     
-                                    with col_min:
-                                        minute_options = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
-                                        minute_labels = [f"{m:02d}分" for m in minute_options]
-                                        closest_minute = min(minute_options, key=lambda x: abs(x - initial_minute))
-                                        default_index = minute_options.index(closest_minute)
-                                        selected_minute_label = st.selectbox(
-                                            "分",
-                                            options=minute_labels,
-                                            index=default_index,
-                                            key=f"minute_select_{post['id']}"
-                                        )
-                                        send_minute = minute_options[minute_labels.index(selected_minute_label)]
-                                
-                                # 送信時刻の表示と時間差計算
-                                send_time = datetime.time(send_hour, send_minute)
-                                scheduled_datetime = datetime.datetime.combine(send_date, send_time)
-                                
-                                # 現在時刻との差を計算
-                                time_diff = scheduled_datetime - now.replace(tzinfo=None)
-                                if time_diff.total_seconds() > 0:
-                                    hours = int(time_diff.total_seconds() // 3600)
-                                    minutes = int((time_diff.total_seconds() % 3600) // 60)
-                                    st.success(f"📅 {scheduled_datetime.strftime('%Y-%m-%d %H:%M')} に送信予定（{hours}時間{minutes}分後）")
-                                else:
-                                    st.error("⚠️ 過去の時刻が選択されています")
-                                
-                                # 時刻保存ボタン
-                                if st.button("💾 時刻を保存", key=f"save_time_{post['id']}", use_container_width=True):
+                                    scheduled_datetime = datetime.datetime.combine(scheduled_date, scheduled_time)
+                                    
+                                    if scheduled_datetime <= datetime.datetime.now():
+                                        st.warning(f"⚠️ ID {post_id}: 過去の時刻です")
+                                        continue
+                                    
                                     try:
+                                        scheduled_at_str = scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
                                         execute_query(
-                                            "UPDATE posts SET scheduled_at = ? WHERE id = ?",
-                                            (scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), post['id'])
+                                            "UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?",
+                                            (scheduled_at_str, post_id)
                                         )
-                                        st.session_state.page_status_message = ("success", f"💾 投稿ID {post['id']} の時刻を {scheduled_datetime.strftime('%Y-%m-%d %H:%M')} で保存しました")
-                                        st.rerun()
+                                        
+                                        # 送信履歴に記録
+                                        scheduled_at_log = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                                        execute_query(
+                                            "INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)",
+                                            (post_id, "x_api", scheduled_at_log, scheduled_at_str, 'scheduled')
+                                        )
+                                        
+                                        scheduled_count += 1
                                     except Exception as e:
-                                        st.session_state.page_status_message = ("error", f"時刻保存エラー: {str(e)}")
-                                        st.rerun()
-                                    
-                                    if time_method == "プリセット時間":
-                                        # プリセット時間選択
-                                        # 現在の時刻を取得（スケジュール時刻があればそれを、なければ元の時刻を使用）
-                                        current_time_for_preset = original_datetime.time()
-                                        
-                                        preset_times = [
-                                            ("07:00 - 朝", datetime.time(7, 0)),
-                                            ("09:00 - 朝", datetime.time(9, 0)),
-                                            ("12:00 - 昼", datetime.time(12, 0)),
-                                            ("15:00 - 午後", datetime.time(15, 0)),
-                                            ("18:00 - 夕方", datetime.time(18, 0)),
-                                            ("20:00 - 夜", datetime.time(20, 0)),
-                                            ("22:00 - 夜", datetime.time(22, 0)),
-                                            ("現在の時刻", current_time_for_preset)
-                                        ]
-                                        
-                                        selected_preset = st.selectbox(
-                                            "プリセット時間を選択",
-                                            options=[opt[0] for opt in preset_times],
-                                            key=f"preset_time_{post['id']}"
-                                        )
-                                        
-                                        send_time = next(opt[1] for opt in preset_times if opt[0] == selected_preset)
-                                    
-                                    else:  # カスタム時間
-                                        col_hour, col_minute = st.columns([1, 1])
-                                        
-                                        with col_hour:
-                                            # 時間のプルダウン選択
-                                            hour_options = list(range(24))
-                                            hour_labels = [f"{h:02d}時" for h in hour_options]
-                                            
-                                            selected_hour_label = st.selectbox(
-                                                "時",
-                                                options=hour_labels,
-                                                index=original_datetime.hour,
-                                                key=f"hour_select_{post['id']}"
-                                            )
-                                            send_hour = hour_options[hour_labels.index(selected_hour_label)]
-                                        
-                                        with col_minute:
-                                            # 分の入力方法を選択
-                                            minute_method = st.radio(
-                                                "分の設定",
-                                                ["プルダウン", "自由入力"],
-                                                key=f"minute_method_{post['id']}",
-                                                horizontal=True
-                                            )
-                                            
-                                            if minute_method == "プルダウン":
-                                                minute_options = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
-                                                minute_labels = [f"{m:02d}分" for m in minute_options]
-                                                
-                                                # 現在の分に最も近いオプションを選択
-                                                closest_minute = min(minute_options, key=lambda x: abs(x - original_datetime.minute))
-                                                default_index = minute_options.index(closest_minute)
-                                                
-                                                selected_minute_label = st.selectbox(
-                                                    "分",
-                                                    options=minute_labels,
-                                                    index=default_index,
-                                                    key=f"minute_select_{post['id']}"
-                                                )
-                                                send_minute = minute_options[minute_labels.index(selected_minute_label)]
-                                            
-                                            else:  # 自由入力
-                                                send_minute = st.number_input(
-                                                    "分（0-59）",
-                                                    min_value=0,
-                                                    max_value=59,
-                                                    value=original_datetime.minute,
-                                                    key=f"minute_input_{post['id']}"
-                                                )
-                                        
-                                        send_time = datetime.time(send_hour, send_minute)
-                                    
-                                    scheduled_datetime = datetime.datetime.combine(send_date, send_time)
-                                    st.info(f"📅 {send_date.strftime('%Y-%m-%d')} {send_time.strftime('%H:%M')} で送信")
-                            
-                            with col_action:
-                                # 送信はX (Twitter)のみ
-                                if st.button("🐦 X (Twitter) 送信", key=f"send_{post['id']}", type="primary", use_container_width=True):
-                                    
-                                    # 現在選択中のキャスト名のnameのみを取得
-                                    current_cast = next((c for c in casts if c['name'] == selected_cast_name), None)
-                                    cast_name_only = current_cast['name'] if current_cast else selected_cast_name
-                                    cast_id = current_cast['id'] if current_cast else None
-                                    
-                                    # 送信時刻の決定（保存済み時刻を最優先）
-                                    if post['scheduled_at']:
-                                        # 保存済みの予約時刻を使用
-                                        final_scheduled_datetime = datetime.datetime.strptime(post['scheduled_at'], '%Y-%m-%d %H:%M:%S')
-                                        st.info(f"📅 保存済み予約時刻 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} で送信")
-                                    else:
-                                        # UIで設定中の時刻を使用
-                                        final_scheduled_datetime = scheduled_datetime
-                                        st.info(f"📅 設定中の時刻 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} で送信")
-                                    
-                                    # 未来の投稿かどうかをチェック（タイムゾーンを統一）
-                                    current_time = datetime.datetime.now(JST)
-                                    
-                                    # final_scheduled_datetimeがnaiveの場合はJSTタイムゾーンを追加
-                                    if final_scheduled_datetime.tzinfo is None:
-                                        final_scheduled_datetime = final_scheduled_datetime.replace(tzinfo=JST)
-                                    
-                                    is_future_post = final_scheduled_datetime > current_time
-                                    
-                                    if is_future_post:
-                                        # 将来の投稿：スケジュール投稿として保存
-                                        scheduled_at_str = final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')
-                                        execute_query("UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?", 
-                                                    (scheduled_at_str, post['id']))
-                                        st.session_state.page_status_message = ("success", f"📅 {final_scheduled_datetime.strftime('%Y-%m-%d %H:%M')} にスケジュール投稿を設定しました")
-                                    else:
-                                        # 即座投稿：X (Twitter)に送信
-                                        success, message = send_post_to_destination(cast_name_only, post['content'], final_scheduled_datetime, "x_api", cast_id)
-                                        
-                                        if success:
-                                            # 送信成功時のデータベース更新
-                                            sent_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("UPDATE posts SET sent_status = 'sent', sent_at = ? WHERE id = ?", (sent_at, post['id']))
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
-                                                        (post['id'], "x_api", sent_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'completed'))
-                                            st.session_state.page_status_message = ("success", message)
-                                        else:
-                                            # 送信失敗時のログ記録
-                                            failed_at = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
-                                            execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status, error_message) VALUES (?, ?, ?, ?, ?, ?)", 
-                                                        (post['id'], "x_api", failed_at, final_scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S'), 'failed', message))
-                                            st.session_state.page_status_message = ("error", message)
-                                    st.rerun()
+                                        st.error(f"ID {post_id} の予約エラー: {str(e)}")
                                 
-                                if st.button("↩️ 投稿案に戻す", key=f"revert_{post['id']}", use_container_width=True):
-                                    execute_query("UPDATE posts SET status = 'draft', posted_at = NULL WHERE id = ?", (post['id'],))
-                                    st.session_state.page_status_message = ("success", "投稿を「投稿案」に戻しました。"); st.rerun()
-                            
-                            st.markdown("---")
+                                if scheduled_count > 0:
+                                    # 予約した投稿をsession_stateから削除
+                                    for idx, row in selected_posts.iterrows():
+                                        post_id = row['ID']
+                                        if post_id in st.session_state.approved_selections:
+                                            del st.session_state.approved_selections[post_id]
+                                    
+                                    st.success(f"✅ {scheduled_count}件の投稿を予約しました！スケジュール投稿タブで確認できます")
+                                    # 予約した投稿を承認一覧から消すためにページをリロード
+                                    st.rerun()
+                                else:
+                                    st.warning("予約する投稿がありませんでした")
+                    
+                    st.markdown("---")
+                    
+                    # 個別投稿の詳細表示（展開可能）
+                    with st.expander("📋 個別投稿の詳細", expanded=False):
+                        for post in approved_posts:
+                            with st.container():
+                                # 投稿内容と基本情報
+                                st.markdown(f"**ID {post['id']}**")
+                                st.success(post['content'], icon="✔")
+                                
+                                # メタ情報
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    created_dt = safe_datetime_parse(post['created_at'])
+                                    st.caption(f"⏰ 作成: {created_dt.strftime('%m-%d %H:%M') if created_dt else '不明'}")
+                                    if post['scheduled_at']:
+                                        scheduled_dt = safe_datetime_parse(post['scheduled_at'])
+                                        st.caption(f"📅 予約: {scheduled_dt.strftime('%m-%d %H:%M') if scheduled_dt else '不明'}")
+                                
+                                with col2:
+                                    st.caption(f"評価: {post['evaluation'] or 'なし'}")
+                                    advice_list = []
+                                    if post['advice']: advice_list.extend(post['advice'].split(','))
+                                    if post['free_advice']: advice_list.append(post['free_advice'])
+                                    if advice_list:
+                                        st.caption(f"アドバイス: {', '.join(advice_list)}")
+                                
+                                # アクションボタン
+                                col_btn1, col_btn2 = st.columns(2)
+                                with col_btn1:
+                                    if st.button("↩️ 投稿案に戻す", key=f"detail_revert_{post['id']}", use_container_width=True):
+                                        execute_query("UPDATE posts SET status = 'draft', posted_at = NULL WHERE id = ?", (post['id'],))
+                                        st.session_state.page_status_message = ("success", "投稿を「投稿案」に戻しました。")
+                                        st.rerun()
+                                
+                                st.markdown("---")
+                
                 else: st.info("承認済みの投稿はまだありません。")
 
             with tab3:
@@ -4380,10 +4242,10 @@ def main():
                                                     (post['id'],)
                                                 )
                                                 print(f"🔄 投稿ID {post['id']} を承認済み一覧に戻しました")
-                                                print(f"   - 承認時間: {post.get('posted_at', 'N/A')}")
-                                                print(f"   - 作成時間: {post.get('created_at', 'N/A')}")
-                                                print(f"   - スケジュール: {post.get('scheduled_at', 'N/A')}")
-                                                print(f"   - 送信状態: {post.get('sent_status', 'N/A')} → not_sent")
+                                                print(f"   - 承認時間: {post['posted_at'] if post['posted_at'] else 'N/A'}")
+                                                print(f"   - 作成時間: {post['created_at'] if post['created_at'] else 'N/A'}")
+                                                print(f"   - スケジュール: {post['scheduled_at'] if post['scheduled_at'] else 'N/A'}")
+                                                print(f"   - 送信状態: {post['sent_status'] if post['sent_status'] else 'N/A'} → not_sent")
                                                 
                                                 st.session_state.page_status_message = ("success", f"↩️ 投稿ID {post['id']} を承認済み一覧に戻しました")
                                                 st.rerun()
