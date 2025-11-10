@@ -4047,6 +4047,7 @@ def main():
                                     scheduled_date = row['送信日']
                                     scheduled_time = row['送信時刻']
                                     
+                                    # VPSはJST環境のため、ナイーブなdatetimeで問題なし
                                     scheduled_datetime = datetime.datetime.combine(scheduled_date, scheduled_time)
                                     
                                     if scheduled_datetime <= datetime.datetime.now():
@@ -4270,10 +4271,9 @@ def main():
                                         try:
                                             # ISO形式の場合（例：2025-10-07T14:50:02.514261）
                                             if 'T' in sent_at_raw:
+                                                # VPSはJST環境のため、既にJST時刻として保存されている
                                                 sent_at_dt = datetime.datetime.fromisoformat(sent_at_raw.replace('Z', '+00:00'))
-                                                # UTCからJSTに変換（+9時間）
-                                                sent_at_jst = sent_at_dt + datetime.timedelta(hours=9)
-                                                sent_at_display = sent_at_jst.strftime('%m-%d %H:%M:%S')
+                                                sent_at_display = sent_at_dt.strftime('%m-%d %H:%M:%S')
                                             else:
                                                 # 既にローカル形式の場合
                                                 sent_at_dt = safe_datetime_parse(sent_at_raw)

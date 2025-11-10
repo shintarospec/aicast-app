@@ -300,6 +300,7 @@ def update_post_status(db_path, post_id, status, tweet_id=None):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
+        # VPSはJST環境のため、datetime.now()で問題なし
         current_time = datetime.now().isoformat()
         
         if status == 'sent':
