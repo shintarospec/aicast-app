@@ -14,6 +14,14 @@ import os
 import subprocess
 import pytz
 
+# 自動生成バッチのインポート
+try:
+    from auto_generation_batch import run_auto_generation
+    AUTO_GENERATION_AVAILABLE = True
+except ImportError:
+    AUTO_GENERATION_AVAILABLE = False
+    print("⚠️  auto_generation_batch.py が見つかりません - 自動生成機能は無効です")
+
 # 🔐 Security Feature Configuration
 USE_SECRET_MANAGER = False  # Set to True to enable Secret Manager security features
                            # Currently disabled for development compatibility
@@ -332,6 +340,17 @@ def main():
         print(f"⚠️  cronサービス確認エラー: {e}")
     
     print()
+    
+    # 🤖 自動生成バッチ実行（毎時00分のみ）
+    current_time = datetime.now()
+    if AUTO_GENERATION_AVAILABLE and current_time.minute == 0:
+        print("🤖 投稿案の自動生成バッチを実行中...")
+        try:
+            run_auto_generation()
+            print("✅ 自動生成バッチ完了")
+        except Exception as e:
+            print(f"❌ 自動生成バッチエラー: {e}")
+        print()
     
     # 動的パス解決: 実行ディレクトリからデータベースを探す
     current_dir = os.path.dirname(os.path.abspath(__file__))
