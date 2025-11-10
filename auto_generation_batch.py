@@ -115,7 +115,7 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
         else:
             vertexai.init(project=project_id, location="us-central1")
         
-        model = GenerativeModel("gemini-1.5-flash")
+        model = GenerativeModel("gemini-2.5-flash")
     except Exception as e:
         error_msg = f"Vertex AI初期化エラー: {e}"
         print(f"❌ {error_msg}")
