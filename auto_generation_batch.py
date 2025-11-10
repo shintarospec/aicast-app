@@ -38,13 +38,14 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
     # 日本時間（JST）で現在時刻を取得
     JST = datetime.timezone(datetime.timedelta(hours=9))
     now = datetime.datetime.now(JST)
-    current_time = now.strftime('%H:%M')
+    current_time_str = now.strftime('%H:%M')
     today = now.strftime('%Y-%m-%d')
     
     print(f"🕐 現在時刻（JST）: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"🔍 検索する生成時刻: {current_time}")
+    print(f"🔍 検索する生成時刻: {current_time_str} 以前（今日未実行）")
     
     # 実行対象の設定を取得
+    # 条件: 今日まだ生成していない && generation_time <= 現在時刻
     settings = execute_query("""
         SELECT 
             ags.id AS setting_id,
@@ -52,23 +53,24 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
             ags.posts_per_day,
             ags.last_generated_at,
             c.name AS cast_name,
-            c.nickname AS cast_nickname
+            c.nickname AS cast_nickname,
+            ags.generation_time
         FROM auto_generation_settings ags
         JOIN casts c ON ags.cast_id = c.id
         WHERE ags.enabled = 1 
-        AND ags.generation_time = ?
+        AND ags.generation_time <= ?
         AND (
             ags.last_generated_at IS NULL 
             OR DATE(ags.last_generated_at) < DATE('now', 'localtime')
         )
-    """, (current_time,), fetch="all")
+    """, (current_time_str,), fetch="all")
     
     if settings:
         print(f"✅ 実行対象: {len(settings)}件")
         for s in settings:
-            print(f"   - {s['cast_name']} ({s['cast_nickname']})")
+            print(f"   - {s['cast_name']} ({s['cast_nickname']}) - 設定時刻: {s['generation_time']}")
     else:
-        print(f"⏭️ 実行対象なし（generation_time={current_time}にマッチする設定がありません）")
+        print(f"⏭️ 実行対象なし（generation_time <= {current_time_str} で今日未実行の設定なし）")
     
     return settings if settings else []
 
