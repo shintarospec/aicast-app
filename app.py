@@ -5627,6 +5627,12 @@ def main():
                     col_save, col_delete = st.columns([3, 1])
                     if col_save.button("💾 ペルソナ情報を保存", key=f"save_persona_{selected_cast_id}", type="primary"):
                         try:
+                            # casts テーブルの必須項目を更新
+                            execute_query(
+                                "UPDATE casts SET name = ?, nickname = ?, age = ? WHERE id = ?",
+                                (edit_name, edit_nickname, edit_age, selected_cast_id)
+                            )
+                            
                             # persona_detailed更新または挿入
                             if any([edit_archetype, edit_occupation, edit_residence, edit_family, edit_quote,
                                    edit_x_purpose, edit_behavior, edit_topics, edit_follow, edit_pain, edit_brand,
