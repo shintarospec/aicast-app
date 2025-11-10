@@ -1,4 +1,5 @@
 streamlit
+streamlit-option-menu
 pandas
 google-cloud-aiplatform
 google-cloud-secret-manager
