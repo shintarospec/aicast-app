@@ -6087,13 +6087,13 @@ def main():
             st.info("""
 **設定内容:**
 - ✅ 有効/無効: チェックで自動生成を有効化
-- ⏰ 生成時刻: 何時に実行するか（例: 09:00）
+- ⏰ 生成時刻: 何時に実行するか（日本時間JST、例: 09:00）
 - 📊 日次生成数: 1日に何件生成するか（1-10件推奨）
 
 **動作仕様:**
 - 設定していないキャストは手動生成のみ
 - 自動生成が設定されているキャストも手動生成可能
-- バッチ処理は毎時00分に実行され、該当時刻の設定を処理
+- バッチ処理は毎時00分に実行され、該当時刻の設定を処理（日本時間JST）
 """)
             
             # 全キャストの自動生成設定を取得
@@ -6151,7 +6151,7 @@ def main():
                         "cast_id": None,  # 非表示
                         "キャスト名": st.column_config.TextColumn("キャスト名", disabled=True),
                         "有効": st.column_config.CheckboxColumn("有効", help="チェックで自動生成を有効化"),
-                        "生成時刻": st.column_config.TimeColumn("生成時刻", format="HH:mm", help="何時に生成するか"),
+                        "生成時刻": st.column_config.TimeColumn("生成時刻（JST）", format="HH:mm", help="日本時間（JST）で何時に生成するか"),
                         "日次生成数": st.column_config.NumberColumn("日次生成数", min_value=1, max_value=10, step=1, help="1日に生成する投稿数")
                     },
                     hide_index=True,

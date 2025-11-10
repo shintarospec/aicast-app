@@ -30,14 +30,18 @@ except ImportError:
 
 def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
     """
-    現在実行すべき自動生成設定を取得
+    現在実行すべき自動生成設定を取得（日本時間JSTベース）
     
     Returns:
         実行対象の設定リスト
     """
-    now = datetime.datetime.now()
+    # 日本時間（JST）で現在時刻を取得
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(JST)
     current_time = now.strftime('%H:%M')
     today = now.strftime('%Y-%m-%d')
+    
+    print(f"🕐 現在時刻（JST）: {now.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 実行対象の設定を取得
     settings = execute_query("""
@@ -226,11 +230,13 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_auto_generation():
     """
-    自動生成バッチのメイン処理
+    自動生成バッチのメイン処理（日本時間JSTベース）
     """
+    JST = datetime.timezone(datetime.timedelta(hours=9))
+    
     print("\n" + "="*60)
     print("🚀 投稿案自動生成バッチ実行開始")
-    print(f"   実行時刻: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   実行時刻（JST）: {datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
     
     # 実行対象の設定を取得
