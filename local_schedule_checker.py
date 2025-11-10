@@ -342,15 +342,36 @@ def main():
     
     print()
     
-    # 🤖 自動生成バッチ実行（毎時00分のみ）
+    # 🤖 自動生成バッチ実行（毎時00分台、重複防止付き）
     current_time = datetime.now()
     if AUTO_GENERATION_AVAILABLE and current_time.minute == 0:
-        print("🤖 投稿案の自動生成バッチを実行中...")
-        try:
-            run_auto_generation()
-            print("✅ 自動生成バッチ完了")
-        except Exception as e:
-            print(f"❌ 自動生成バッチエラー: {e}")
+        # 重複実行防止: 現在時刻（時）をフラグファイルで管理
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        flag_file = os.path.join(current_dir, '.auto_generation_last_run')
+        current_hour_key = current_time.strftime('%Y-%m-%d-%H')
+        
+        # 前回実行時刻を確認
+        should_run = True
+        if os.path.exists(flag_file):
+            try:
+                with open(flag_file, 'r') as f:
+                    last_run_hour = f.read().strip()
+                    if last_run_hour == current_hour_key:
+                        should_run = False
+                        print(f"⏭️  自動生成バッチは既に実行済み（{current_hour_key}）")
+            except:
+                pass
+        
+        if should_run:
+            print("🤖 投稿案の自動生成バッチを実行中...")
+            try:
+                run_auto_generation()
+                # 実行成功時にフラグファイルを更新
+                with open(flag_file, 'w') as f:
+                    f.write(current_hour_key)
+                print("✅ 自動生成バッチ完了")
+            except Exception as e:
+                print(f"❌ 自動生成バッチエラー: {e}")
         print()
     
     # 動的パス解決: 実行ディレクトリからデータベースを探す
