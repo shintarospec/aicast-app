@@ -60,7 +60,7 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
             ags.last_generated_at IS NULL 
             OR DATE(ags.last_generated_at) < DATE('now', 'localtime')
         )
-    """, (current_time,))
+    """, (current_time,), fetch="all")
     
     return settings if settings else []
 
