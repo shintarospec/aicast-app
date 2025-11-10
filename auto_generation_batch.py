@@ -265,8 +265,8 @@ def run_auto_generation():
     # 各設定について投稿案を生成
     for setting in settings:
         result = generate_posts_for_cast(setting)
-        total_success += result['success']
-        total_failed += result['failed']
+        total_success += result['posts_generated']
+        total_failed += result['posts_failed']
     
     print("\n" + "="*60)
     print("🎉 投稿案自動生成バッチ実行完了")
