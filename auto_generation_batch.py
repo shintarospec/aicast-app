@@ -42,6 +42,7 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
     today = now.strftime('%Y-%m-%d')
     
     print(f"🕐 現在時刻（JST）: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔍 検索する生成時刻: {current_time}")
     
     # 実行対象の設定を取得
     settings = execute_query("""
@@ -61,6 +62,13 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
             OR DATE(ags.last_generated_at) < DATE('now', 'localtime')
         )
     """, (current_time,), fetch="all")
+    
+    if settings:
+        print(f"✅ 実行対象: {len(settings)}件")
+        for s in settings:
+            print(f"   - {s['cast_name']} ({s['cast_nickname']})")
+    else:
+        print(f"⏭️ 実行対象なし（generation_time={current_time}にマッチする設定がありません）")
     
     return settings if settings else []
 
