@@ -342,23 +342,23 @@ def main():
     
     print()
     
-    # 🤖 自動生成バッチ実行（毎時00分台、重複防止付き）
+    # 🤖 自動生成バッチ実行（毎時00分台、1日1回のみ）
     current_time = datetime.now()
     if AUTO_GENERATION_AVAILABLE and current_time.minute == 0:
-        # 重複実行防止: 現在時刻（時）をフラグファイルで管理
+        # 重複実行防止: 日付をフラグファイルで管理（1日1回のみ実行）
         current_dir = os.path.dirname(os.path.abspath(__file__))
         flag_file = os.path.join(current_dir, '.auto_generation_last_run')
-        current_hour_key = current_time.strftime('%Y-%m-%d-%H')
+        current_date_key = current_time.strftime('%Y-%m-%d')
         
-        # 前回実行時刻を確認
+        # 前回実行日を確認
         should_run = True
         if os.path.exists(flag_file):
             try:
                 with open(flag_file, 'r') as f:
-                    last_run_hour = f.read().strip()
-                    if last_run_hour == current_hour_key:
+                    last_run_date = f.read().strip()
+                    if last_run_date == current_date_key:
                         should_run = False
-                        print(f"⏭️  自動生成バッチは既に実行済み（{current_hour_key}）")
+                        print(f"⏭️  自動生成バッチは既に実行済み（{current_date_key}）")
             except:
                 pass
         
@@ -368,7 +368,7 @@ def main():
                 run_auto_generation()
                 # 実行成功時にフラグファイルを更新
                 with open(flag_file, 'w') as f:
-                    f.write(current_hour_key)
+                    f.write(current_date_key)
                 print("✅ 自動生成バッチ完了")
             except Exception as e:
                 print(f"❌ 自動生成バッチエラー: {e}")
