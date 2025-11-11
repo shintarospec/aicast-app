@@ -5178,17 +5178,41 @@ def main():
                                 except (KeyError, IndexError):
                                     x_sample_name_val = ''
                             
-                            edit_archetype = col1.text_input("アーキタイプ", value=archetype_val, key=f"edit_archetype_{selected_cast_id}")
-                            edit_occupation = col2.text_input("職業", value=occupation_val, key=f"edit_occupation_{selected_cast_id}")
-                            edit_residence = col1.text_input("居住地", value=residence_val, key=f"edit_residence_{selected_cast_id}")
-                            edit_family = col2.text_input("家族構成", value=family_val, key=f"edit_family_{selected_cast_id}")
-                            edit_quote = st.text_input("象徴的な一言", value=quote_val, key=f"edit_quote_{selected_cast_id}")
-                            edit_x_purpose = st.text_input("X利用目的", value=x_purpose_val, key=f"edit_x_purpose_{selected_cast_id}")
-                            edit_behavior = st.text_area("行動パターン", value=behavior_val, key=f"edit_behavior_{selected_cast_id}")
-                            edit_topics = st.text_input("関心トピック", value=topics_val, key=f"edit_topics_{selected_cast_id}")
-                            edit_follow = st.text_input("主なフォロー対象", value=follow_val, key=f"edit_follow_{selected_cast_id}")
-                            edit_pain = st.text_input("プラットフォーム不満", value=pain_val, key=f"edit_pain_{selected_cast_id}")
-                            edit_brand = st.text_input("ブランド関係", value=brand_val, key=f"edit_brand_{selected_cast_id}")
+                            # 🔧 修正: parsed_値をedit_キーに初期化（edit_キーが存在しない場合のみ）
+                            if f"edit_archetype_{selected_cast_id}" not in st.session_state and archetype_val:
+                                st.session_state[f"edit_archetype_{selected_cast_id}"] = archetype_val
+                            if f"edit_occupation_{selected_cast_id}" not in st.session_state and occupation_val:
+                                st.session_state[f"edit_occupation_{selected_cast_id}"] = occupation_val
+                            if f"edit_residence_{selected_cast_id}" not in st.session_state and residence_val:
+                                st.session_state[f"edit_residence_{selected_cast_id}"] = residence_val
+                            if f"edit_family_{selected_cast_id}" not in st.session_state and family_val:
+                                st.session_state[f"edit_family_{selected_cast_id}"] = family_val
+                            if f"edit_quote_{selected_cast_id}" not in st.session_state and quote_val:
+                                st.session_state[f"edit_quote_{selected_cast_id}"] = quote_val
+                            if f"edit_x_purpose_{selected_cast_id}" not in st.session_state and x_purpose_val:
+                                st.session_state[f"edit_x_purpose_{selected_cast_id}"] = x_purpose_val
+                            if f"edit_behavior_{selected_cast_id}" not in st.session_state and behavior_val:
+                                st.session_state[f"edit_behavior_{selected_cast_id}"] = behavior_val
+                            if f"edit_topics_{selected_cast_id}" not in st.session_state and topics_val:
+                                st.session_state[f"edit_topics_{selected_cast_id}"] = topics_val
+                            if f"edit_follow_{selected_cast_id}" not in st.session_state and follow_val:
+                                st.session_state[f"edit_follow_{selected_cast_id}"] = follow_val
+                            if f"edit_pain_{selected_cast_id}" not in st.session_state and pain_val:
+                                st.session_state[f"edit_pain_{selected_cast_id}"] = pain_val
+                            if f"edit_brand_{selected_cast_id}" not in st.session_state and brand_val:
+                                st.session_state[f"edit_brand_{selected_cast_id}"] = brand_val
+                            
+                            edit_archetype = col1.text_input("アーキタイプ", key=f"edit_archetype_{selected_cast_id}")
+                            edit_occupation = col2.text_input("職業", key=f"edit_occupation_{selected_cast_id}")
+                            edit_residence = col1.text_input("居住地", key=f"edit_residence_{selected_cast_id}")
+                            edit_family = col2.text_input("家族構成", key=f"edit_family_{selected_cast_id}")
+                            edit_quote = st.text_input("象徴的な一言", key=f"edit_quote_{selected_cast_id}")
+                            edit_x_purpose = st.text_input("X利用目的", key=f"edit_x_purpose_{selected_cast_id}")
+                            edit_behavior = st.text_area("行動パターン", key=f"edit_behavior_{selected_cast_id}")
+                            edit_topics = st.text_input("関心トピック", key=f"edit_topics_{selected_cast_id}")
+                            edit_follow = st.text_input("主なフォロー対象", key=f"edit_follow_{selected_cast_id}")
+                            edit_pain = st.text_input("プラットフォーム不満", key=f"edit_pain_{selected_cast_id}")
+                            edit_brand = st.text_input("ブランド関係", key=f"edit_brand_{selected_cast_id}")
                             
                             st.markdown("#### 🎲 Xアカウントサンプル（ランダム3つ選択）")
                             # 3組のサンプルアカウント
@@ -5388,7 +5412,8 @@ def main():
                                                 st.write(result)
                                             st.info("💡 下のフォームで内容を確認し、サンプル投稿は「📥 一括インポート」ボタンでDBに登録してください")
                                             
-                                            # 🔧 Xサンプルのedit_キーをクリア（新しいparsed_値を反映させるため）
+                                            # 🔧 edit_キーをクリア（新しいparsed_値を反映させるため）
+                                            # Xサンプル
                                             for i in range(1, 4):
                                                 edit_key_id = f"edit_x_sample_id_{i}_{selected_cast_id}"
                                                 edit_key_name = f"edit_x_sample_name_{i}_{selected_cast_id}"
@@ -5396,6 +5421,37 @@ def main():
                                                     del st.session_state[edit_key_id]
                                                 if edit_key_name in st.session_state:
                                                     del st.session_state[edit_key_name]
+                                            
+                                            # ペルソナ詳細
+                                            persona_edit_keys = [
+                                                f"edit_archetype_{selected_cast_id}",
+                                                f"edit_occupation_{selected_cast_id}",
+                                                f"edit_residence_{selected_cast_id}",
+                                                f"edit_family_{selected_cast_id}",
+                                                f"edit_quote_{selected_cast_id}",
+                                                f"edit_x_purpose_{selected_cast_id}",
+                                                f"edit_behavior_{selected_cast_id}",
+                                                f"edit_topics_{selected_cast_id}",
+                                                f"edit_follow_{selected_cast_id}",
+                                                f"edit_pain_{selected_cast_id}",
+                                                f"edit_brand_{selected_cast_id}"
+                                            ]
+                                            for key in persona_edit_keys:
+                                                if key in st.session_state:
+                                                    del st.session_state[key]
+                                            
+                                            # 運営ミッション関連
+                                            mission_edit_keys = [
+                                                f"edit_mission_{selected_cast_id}",
+                                                f"edit_persona_design_{selected_cast_id}",
+                                                f"edit_content_{selected_cast_id}",
+                                                f"edit_goal_{selected_cast_id}",
+                                                f"edit_notes_{selected_cast_id}",
+                                                f"edit_profile_{selected_cast_id}"
+                                            ]
+                                            for key in mission_edit_keys:
+                                                if key in st.session_state:
+                                                    del st.session_state[key]
                                         else:
                                             st.warning("⚠️ 抽出できる情報が見つかりませんでした。テキストの形式を確認してください。")
                                         
@@ -5421,14 +5477,28 @@ def main():
                         notes_val = mission_data['additional_notes'] if mission_data and mission_data['additional_notes'] else ''
                         profile_val = st.session_state.get(f'parsed_profile_{selected_cast_id}', profile_data['profile_text'] if profile_data and profile_data['profile_text'] else '')
                         
-                        edit_mission = st.text_area("運営ミッション", value=mission_val, key=f"edit_mission_{selected_cast_id}", height=100)
-                        edit_persona_design = st.text_area("ペルソナ設計意図", value=persona_design_val, key=f"edit_persona_design_{selected_cast_id}", height=100)
-                        edit_content = st.text_area("コンテンツ戦略", value=content_val, key=f"edit_content_{selected_cast_id}", height=100)
-                        edit_goal = st.text_area("最終目標", value=goal_val, key=f"edit_goal_{selected_cast_id}", height=100)
-                        edit_notes = st.text_area("補足事項", value=notes_val, key=f"edit_notes_{selected_cast_id}", height=100)
+                        # 🔧 修正: parsed_値をedit_キーに初期化（edit_キーが存在しない場合のみ）
+                        if f"edit_mission_{selected_cast_id}" not in st.session_state and mission_val:
+                            st.session_state[f"edit_mission_{selected_cast_id}"] = mission_val
+                        if f"edit_persona_design_{selected_cast_id}" not in st.session_state and persona_design_val:
+                            st.session_state[f"edit_persona_design_{selected_cast_id}"] = persona_design_val
+                        if f"edit_content_{selected_cast_id}" not in st.session_state and content_val:
+                            st.session_state[f"edit_content_{selected_cast_id}"] = content_val
+                        if f"edit_goal_{selected_cast_id}" not in st.session_state and goal_val:
+                            st.session_state[f"edit_goal_{selected_cast_id}"] = goal_val
+                        if f"edit_notes_{selected_cast_id}" not in st.session_state and notes_val:
+                            st.session_state[f"edit_notes_{selected_cast_id}"] = notes_val
+                        if f"edit_profile_{selected_cast_id}" not in st.session_state and profile_val:
+                            st.session_state[f"edit_profile_{selected_cast_id}"] = profile_val
+                        
+                        edit_mission = st.text_area("運営ミッション", key=f"edit_mission_{selected_cast_id}", height=100)
+                        edit_persona_design = st.text_area("ペルソナ設計意図", key=f"edit_persona_design_{selected_cast_id}", height=100)
+                        edit_content = st.text_area("コンテンツ戦略", key=f"edit_content_{selected_cast_id}", height=100)
+                        edit_goal = st.text_area("最終目標", key=f"edit_goal_{selected_cast_id}", height=100)
+                        edit_notes = st.text_area("補足事項", key=f"edit_notes_{selected_cast_id}", height=100)
                         
                         st.markdown("### サンプルプロフィール")
-                        edit_profile = st.text_area("サンプルプロフィール", value=profile_val, key=f"edit_profile_{selected_cast_id}", height=100)
+                        edit_profile = st.text_area("サンプルプロフィール", key=f"edit_profile_{selected_cast_id}", height=100)
                         
                         # サンプル投稿一括インポート機能
                         st.markdown("---")
