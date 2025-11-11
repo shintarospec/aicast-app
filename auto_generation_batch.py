@@ -56,8 +56,8 @@ def init_vertex_ai():
         return _gemini_model
     except Exception as e:
         print(f"❌ Vertex AI初期化エラー: {e}")
+        traceback.print_exc()
         return None
-    import vertexai
 
 
 
