@@ -13,10 +13,14 @@ import random
 import time
 from typing import List, Dict, Any
 import os
+import fcntl
 
 # app.pyから必要な関数をインポート
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app import execute_query
+
+# ロックファイルのパス
+LOCK_FILE = os.path.join(os.path.dirname(__file__), '.auto_generation.lock')
 
 # Vertex AI のインポート
 try:
@@ -24,6 +28,36 @@ try:
     import vertexai
 except ImportError:
     from vertexai.preview.generative_models import GenerativeModel
+    import vertexai
+
+# Vertex AI初期化（グローバルで1回のみ）
+_vertex_ai_initialized = False
+_gemini_model = None
+
+def init_vertex_ai():
+    """Vertex AIを初期化（初回のみ実行）"""
+    global _vertex_ai_initialized, _gemini_model
+    
+    if _vertex_ai_initialized:
+        return _gemini_model
+    
+    try:
+        project_id = os.getenv("GCP_PROJECT", "aicast-472807")
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        
+        if credentials_path and os.path.exists(credentials_path):
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_file(credentials_path)
+            vertexai.init(project=project_id, location="us-central1", credentials=credentials)
+        else:
+            vertexai.init(project=project_id, location="us-central1")
+        
+        _gemini_model = GenerativeModel("gemini-2.5-flash")
+        _vertex_ai_initialized = True
+        return _gemini_model
+    except Exception as e:
+        print(f"❌ Vertex AI初期化エラー: {e}")
+        return None
     import vertexai
 
 
@@ -117,21 +151,10 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
             'error_message': error_msg
         }
     
-    # Vertex AI初期化（サービスアカウント認証）
-    try:
-        project_id = os.getenv("GCP_PROJECT", "aicast-472807")
-        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        
-        if credentials_path and os.path.exists(credentials_path):
-            from google.oauth2 import service_account
-            credentials = service_account.Credentials.from_service_account_file(credentials_path)
-            vertexai.init(project=project_id, location="us-central1", credentials=credentials)
-        else:
-            vertexai.init(project=project_id, location="us-central1")
-        
-        model = GenerativeModel("gemini-2.5-flash")
-    except Exception as e:
-        error_msg = f"Vertex AI初期化エラー: {e}"
+    # Vertex AIモデルを取得
+    model = init_vertex_ai()
+    if model is None:
+        error_msg = "Vertex AI初期化に失敗しました"
         print(f"❌ {error_msg}")
         return {
             'posts_generated': 0,
@@ -276,9 +299,28 @@ def run_auto_generation():
 
 
 if __name__ == "__main__":
+    lock_file = None
     try:
+        # ロックファイルを取得（重複実行を防止）
+        lock_file = open(LOCK_FILE, 'w')
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError:
+            print("⏭️ 別のバッチ処理が実行中です。スキップします。")
+            sys.exit(0)
+        
+        # バッチ処理実行
         run_auto_generation()
+        
     except Exception as e:
         print(f"\n❌ 致命的エラー: {e}")
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        # ロックを解放
+        if lock_file:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                lock_file.close()
+            except:
+                pass
