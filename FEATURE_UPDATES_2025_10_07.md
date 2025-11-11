@@ -1117,6 +1117,200 @@ if AUTO_GENERATION_AVAILABLE and current_time.minute == 0:
 
 ---
 
-**最終更新**: 2025年11月10日  
-**文書バージョン**: 1.4  
-**対象システム**: AIcast Room v2025.11.10
+## 14. テキスト一括インポート機能の本番環境対応（2025年11月11日）
+
+### **問題背景**
+- ローカル環境ではテキスト一括インポート機能が正常動作
+- 本番環境では「ペルソナ詳細」「運営ミッション」がフォームに反映されない
+- サンプル投稿とXサンプルIDのみ正常に登録される
+- **根本原因**: Streamlitのセッションステート管理の仕様による問題
+
+### **技術的な問題の詳細**
+
+#### Streamlitの`value`パラメータと`key`の競合
+```python
+# 問題のあったコード
+edit_mission = st.text_area("運営ミッション", value=mission_val, key="edit_mission_123")
+```
+
+**動作パターン**:
+1. **初回レンダリング**: `value`パラメータの値が使われる ✅
+2. **2回目以降**: セッションステートの`key`に値があれば、それが優先され`value`は無視される ❌
+
+#### ローカル環境で動作した理由
+- 開発中は頻繁にStreamlitを再起動
+- 再起動すると**セッションステートが完全にクリア**される
+- 毎回クリーンな状態でテストしていたため、`edit_mission_123`キーが存在せず、`value`パラメータが正しく動作
+
+#### 本番環境で失敗した理由
+- アプリケーションが長時間稼働し続ける
+- ユーザーセッションが長時間保持される
+- 以前の操作で設定された`edit_xxx`キーがセッションステートに残り続ける
+- 新しい抽出を行っても、古い`edit_xxx`キーが優先されてしまう
+
+### **実装内容**
+
+#### 修正方針
+Xサンプルと同じ方式に統一し、セッションステート管理を明示的に制御：
+
+1. ✅ `value`パラメータを削除し、セッションステートのみで値を管理
+2. ✅ 抽出時に`edit_xxx`キーをクリアして新しい値を反映
+3. ✅ `parsed_xxx`から`edit_xxx`への初期化ロジックを追加
+
+#### コード修正内容
+
+**ペルソナ詳細フォーム（11項目）**:
+```python
+# 🔧 修正: parsed_値をedit_キーに初期化（edit_キーが存在しない場合のみ）
+if f"edit_archetype_{selected_cast_id}" not in st.session_state and archetype_val:
+    st.session_state[f"edit_archetype_{selected_cast_id}"] = archetype_val
+# ... 他10項目も同様
+
+# valueパラメータを削除（セッションステートで管理）
+edit_archetype = col1.text_input("アーキタイプ", key=f"edit_archetype_{selected_cast_id}")
+edit_occupation = col2.text_input("職業", key=f"edit_occupation_{selected_cast_id}")
+# ... 以下同様
+```
+
+**運営ミッション関連フォーム（6項目）**:
+```python
+# 🔧 修正: parsed_値をedit_キーに初期化
+if f"edit_mission_{selected_cast_id}" not in st.session_state and mission_val:
+    st.session_state[f"edit_mission_{selected_cast_id}"] = mission_val
+# ... 他5項目も同様
+
+# valueパラメータを削除
+edit_mission = st.text_area("運営ミッション", key=f"edit_mission_{selected_cast_id}", height=100)
+edit_persona_design = st.text_area("ペルソナ設計意図", key=f"edit_persona_design_{selected_cast_id}", height=100)
+# ... 以下同様
+```
+
+**抽出時のクリーン処理**:
+```python
+# ペルソナ詳細のedit_キーをクリア
+persona_edit_keys = [
+    f"edit_archetype_{selected_cast_id}",
+    f"edit_occupation_{selected_cast_id}",
+    # ... 全11項目
+]
+for key in persona_edit_keys:
+    if key in st.session_state:
+        del st.session_state[key]
+
+# 運営ミッション関連のedit_キーをクリア
+mission_edit_keys = [
+    f"edit_mission_{selected_cast_id}",
+    f"edit_persona_design_{selected_cast_id}",
+    # ... 全6項目
+]
+for key in mission_edit_keys:
+    if key in st.session_state:
+        del st.session_state[key]
+```
+
+### **影響範囲**
+
+#### 修正対象フィールド（計17項目）
+
+**ペルソナ詳細**（11項目）:
+1. アーキタイプ
+2. 職業
+3. 居住地
+4. 家族構成
+5. 象徴的な一言
+6. X利用目的
+7. 行動パターン
+8. 関心トピック
+9. 主なフォロー対象
+10. プラットフォーム不満
+11. ブランド関係
+
+**運営ミッション関連**（6項目）:
+1. 運営ミッション
+2. ペルソナ設計意図
+3. コンテンツ戦略
+4. 最終目標
+5. 補足事項
+6. サンプルプロフィール
+
+### **動作フロー（修正後）**
+
+```
+1. テキスト一括インポート実行
+   ↓
+2. 正規表現でテキストから情報を抽出
+   ↓
+3. セッションステートに parsed_xxx キーで保存
+   ↓
+4. 既存の edit_xxx キーを削除（クリーン処理）
+   ↓
+5. st.rerun() → ページリロード
+   ↓
+6. フォーム描画前に初期化
+   - edit_xxx キーが存在しない場合のみ
+   - parsed_xxx から edit_xxx へ値をコピー
+   ↓
+7. フォーム描画（valueパラメータなし）
+   - セッションステートの edit_xxx を直接参照
+   ↓
+8. ユーザーが内容確認
+   ↓
+9. 「💾 ペルソナ情報を保存」ボタンクリック
+   ↓
+10. edit_xxx の値をDBに保存
+```
+
+### **テスト結果**
+
+#### 本番環境での動作確認
+- ✅ テキスト一括インポートで全項目が正しく抽出
+- ✅ ペルソナ詳細（11項目）がフォームに反映
+- ✅ 運営ミッション関連（6項目）がフォームに反映
+- ✅ 保存後、DBに正しく登録される
+- ✅ ページリロード後も値が保持される
+- ✅ セッション長時間保持後も新しい抽出値が優先される
+
+### **技術的な教訓**
+
+#### Streamlitのセッションステート管理のベストプラクティス
+
+**❌ 避けるべきパターン**:
+```python
+# valueとkeyの両方を使うと、セッションの状態で挙動が変わる
+widget_value = st.text_input("Label", value=some_value, key="widget_key")
+```
+
+**✅ 推奨パターン**:
+```python
+# セッションステートで明示的に初期化
+if "widget_key" not in st.session_state and initial_value:
+    st.session_state["widget_key"] = initial_value
+
+# keyのみ指定（valueパラメータは使わない）
+widget_value = st.text_input("Label", key="widget_key")
+```
+
+#### 環境差異の検証ポイント
+1. **ローカル開発**: 頻繁な再起動 → セッションステートがクリーンな状態
+2. **本番環境**: 長時間稼働 → セッションステートが累積・保持される
+3. **テスト時の注意**: 本番環境で長時間セッションを保持した状態で検証が必要
+
+### **デプロイ情報**
+
+- **コミットID**: `a0616d79`
+- **ブランチ**: `clean-production`
+- **修正ファイル**: `app.py`（88行追加、18行削除）
+- **デプロイ日時**: 2025年11月11日 12:44 (JST)
+- **動作確認**: 本番環境（153.126.194.114:8503）で確認済み
+
+### **関連ドキュメント**
+- `copilot-instructions.md`: UIカスタマイズと運用パターン
+- `ACCOUNT_GUIDELINES_MAPPING.md`: テキスト一括インポートの仕様
+- Streamlit公式ドキュメント: [Session State](https://docs.streamlit.io/library/api-reference/session-state)
+
+---
+
+**最終更新**: 2025年11月11日  
+**文書バージョン**: 1.5  
+**対象システム**: AIcast Room v2025.11.11
+
