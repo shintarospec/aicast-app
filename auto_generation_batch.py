@@ -23,12 +23,11 @@ from app import execute_query
 LOCK_FILE = os.path.join(os.path.dirname(__file__), '.auto_generation.lock')
 
 # Vertex AI のインポート
+import vertexai
 try:
     from vertexai.generative_models import GenerativeModel
-    import vertexai
 except ImportError:
     from vertexai.preview.generative_models import GenerativeModel
-    import vertexai
 
 # Vertex AI初期化（グローバルで1回のみ）
 _vertex_ai_initialized = False
