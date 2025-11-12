@@ -126,9 +126,9 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
     cast_nickname = setting['cast_nickname']
     posts_per_day = setting['posts_per_day']
     setting_id = setting['setting_id']
-    auto_approve = setting.get('auto_approve', 0)
-    min_days_offset = setting.get('min_days_offset', 2)
-    max_days_offset = setting.get('max_days_offset', 4)
+    auto_approve = setting['auto_approve'] if 'auto_approve' in setting.keys() else 0
+    min_days_offset = setting['min_days_offset'] if 'min_days_offset' in setting.keys() else 2
+    max_days_offset = setting['max_days_offset'] if 'max_days_offset' in setting.keys() else 4
     
     print(f"\n{'='*60}")
     print(f"🤖 自動生成開始: {cast_name}（{cast_nickname}）")
