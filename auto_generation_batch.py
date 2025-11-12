@@ -15,6 +15,15 @@ from typing import List, Dict, Any
 import os
 import fcntl
 
+# 環境変数を明示的に設定（cron実行時の保証）
+if 'GOOGLE_APPLICATION_CREDENTIALS' not in os.environ:
+    credentials_path = os.path.join(os.path.dirname(__file__), 'credentials', 'service-account-key.json')
+    if os.path.exists(credentials_path):
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+        
+if 'GCP_PROJECT' not in os.environ:
+    os.environ['GCP_PROJECT'] = 'aicast-472807'
+
 # app.pyから必要な関数をインポート
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app import execute_query
