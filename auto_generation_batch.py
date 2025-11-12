@@ -85,6 +85,9 @@ def get_active_auto_generation_settings() -> List[Dict[str, Any]]:
             ags.cast_id,
             ags.posts_per_day,
             ags.last_generated_at,
+            ags.auto_approve,
+            ags.min_days_offset,
+            ags.max_days_offset,
             c.name AS cast_name,
             c.nickname AS cast_nickname,
             ags.generation_time
@@ -123,10 +126,15 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
     cast_nickname = setting['cast_nickname']
     posts_per_day = setting['posts_per_day']
     setting_id = setting['setting_id']
+    auto_approve = setting.get('auto_approve', 0)
+    min_days_offset = setting.get('min_days_offset', 2)
+    max_days_offset = setting.get('max_days_offset', 4)
     
     print(f"\n{'='*60}")
     print(f"🤖 自動生成開始: {cast_name}（{cast_nickname}）")
     print(f"   生成件数: {posts_per_day}件")
+    print(f"   自動承認: {'完全自動' if auto_approve == 2 else ('承認のみ' if auto_approve == 1 else '手動')}")
+    print(f"   予約期間: {min_days_offset}-{max_days_offset}日後")
     print(f"{'='*60}")
     
     success_count = 0
@@ -195,18 +203,57 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
             generated_text = re.sub(r'^[「『"]([^」』"]+)[」』"]$', r'\1', generated_text)
             
             if generated_text:
-                # ランダムな投稿時刻を生成（7:00-23:00）
+                # 2-4日後のランダム時刻を生成（7:00-23:00）
+                days_offset = random.randint(min_days_offset, max_days_offset)
                 random_hour = random.randint(7, 23)
                 random_minute = random.randint(0, 59)
-                created_at = datetime.datetime.now().replace(
-                    hour=random_hour, minute=random_minute, second=0, microsecond=0
-                ).strftime('%Y-%m-%d %H:%M:%S')
                 
-                # データベースに保存
-                execute_query("""
-                    INSERT INTO posts (cast_id, created_at, content, theme, generated_at)
-                    VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
-                """, (cast_id, created_at, generated_text, category_text))
+                scheduled_time = (datetime.datetime.now() + datetime.timedelta(days=days_offset)).replace(
+                    hour=random_hour, minute=random_minute, second=0, microsecond=0
+                )
+                scheduled_time_str = scheduled_time.strftime('%Y-%m-%d %H:%M:%S')
+                
+                # 自動承認設定に応じて処理
+                if auto_approve >= 1:
+                    # 承認済みとして保存（status='approved'）
+                    execute_query("""
+                        INSERT INTO posts (
+                            cast_id, content, theme, 
+                            status, posted_at, scheduled_at,
+                            created_at, generated_at
+                        ) VALUES (?, ?, ?, 'approved', ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+                    """, (cast_id, generated_text, category_text, scheduled_time_str, scheduled_time_str))
+                    
+                    post_id = execute_query("SELECT last_insert_rowid() as id", fetch="one")['id']
+                    
+                    # 完全自動（auto_approve=2）の場合は即座に予約
+                    if auto_approve == 2:
+                        try:
+                            from app import send_to_google_sheets
+                            success, message = send_to_google_sheets(
+                                cast_name=cast_name,
+                                post_content=generated_text,
+                                scheduled_datetime=scheduled_time,
+                                cast_id=cast_id
+                            )
+                            if success:
+                                execute_query("UPDATE posts SET sent_status = 'scheduled' WHERE id = ?", (post_id,))
+                                print(f"   📅 予約完了: {scheduled_time_str}")
+                            else:
+                                print(f"   ⚠️ 予約失敗: {message}")
+                        except Exception as e:
+                            print(f"   ⚠️ 予約エラー: {e}")
+                    else:
+                        print(f"   ✅ 承認済み（手動予約待ち）: {scheduled_time_str}")
+                else:
+                    # 下書きとして保存（status='draft'）
+                    execute_query("""
+                        INSERT INTO posts (
+                            cast_id, content, theme,
+                            status, created_at, generated_at
+                        ) VALUES (?, ?, ?, 'draft', datetime('now', 'localtime'), datetime('now', 'localtime'))
+                    """, (cast_id, generated_text, category_text))
+                    print(f"   📝 下書き保存（手動承認待ち）")
                 
                 success_count += 1
                 print(f"✅ 投稿案 {i+1} 生成成功")
