@@ -2672,15 +2672,37 @@ def main():
     
     try:
         import vertexai
+        from google.oauth2 import service_account
+        
         if 'auth_done' not in st.session_state:
+            # サービスアカウントキーの自動検出
+            credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            if not credentials_path:
+                default_paths = [
+                    'credentials/service-account-key.json',
+                    '/home/ubuntu/aicast-app/credentials/service-account-key.json',
+                    os.path.join(os.path.dirname(__file__), 'credentials', 'service-account-key.json')
+                ]
+                for path in default_paths:
+                    if os.path.exists(path):
+                        credentials_path = path
+                        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = path
+                        os.environ['GCP_PROJECT'] = 'aicast-472807'
+                        print(f"✅ 認証ファイル自動検出: {path}")
+                        break
+            
             # 🌐 Streamlit Cloud production environment support
             if Config.is_production_environment() and "gcp_service_account" in st.secrets:
                 # Use Streamlit Cloud secrets for GCP authentication
-                from google.oauth2 import service_account
                 credentials_info = dict(st.secrets["gcp_service_account"])
                 credentials = service_account.Credentials.from_service_account_info(credentials_info)
                 vertexai.init(project=project_id, location=location, credentials=credentials)
                 st.sidebar.success("🌐 Streamlit Cloud認証完了")
+            elif credentials_path and os.path.exists(credentials_path):
+                # サービスアカウントキー認証
+                credentials = service_account.Credentials.from_service_account_file(credentials_path)
+                vertexai.init(project=project_id, location=location, credentials=credentials)
+                print(f"✅ Vertex AI初期化完了（サービスアカウント: {credentials_path}）")
             elif Config.is_production_environment():
                 # Streamlit Cloud環境でサービスアカウントが使用できない場合、OAuth認証を試行
                 try:
@@ -4628,18 +4650,31 @@ def main():
             from google.oauth2 import service_account
             
             # 環境変数からプロジェクトIDを取得
-            project_id = os_module.environ.get('GCP_PROJECT', 'aicast-472807')
-            location = 'us-central1'
+            ai_project_id = os_module.environ.get('GCP_PROJECT', 'aicast-472807')
+            ai_location = 'us-central1'
             
-            # サービスアカウントキー認証
+            # サービスアカウントキー認証（複数パスをチェック）
             credentials_path = os_module.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            
+            # 環境変数が設定されていない場合、デフォルトパスを試行
+            if not credentials_path:
+                default_paths = [
+                    'credentials/service-account-key.json',
+                    '/home/ubuntu/aicast-app/credentials/service-account-key.json',
+                    os_module.path.join(os_module.path.dirname(__file__), 'credentials', 'service-account-key.json')
+                ]
+                for path in default_paths:
+                    if os_module.path.exists(path):
+                        credentials_path = path
+                        break
+            
             if credentials_path and os_module.path.exists(credentials_path):
                 credentials = service_account.Credentials.from_service_account_file(credentials_path)
-                vertexai.init(project=project_id, location=location, credentials=credentials)
-                print(f"✅ AI画像投稿: Vertex AI初期化完了（サービスアカウント）")
+                vertexai.init(project=ai_project_id, location=ai_location, credentials=credentials)
+                print(f"✅ AI画像投稿: Vertex AI初期化完了（サービスアカウント: {credentials_path}）")
             else:
                 # ADC認証
-                vertexai.init(project=project_id, location=location)
+                vertexai.init(project=ai_project_id, location=ai_location)
                 print(f"✅ AI画像投稿: Vertex AI初期化完了（ADC）")
         except Exception as init_error:
             st.warning(f"⚠️ Vertex AI初期化エラー: {init_error}")
