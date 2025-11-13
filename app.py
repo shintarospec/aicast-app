@@ -4590,21 +4590,25 @@ def main():
                 """)
             st.stop()
         
-        # 認証状況をチェック
+        # 認証状況をチェック（環境変数ベース）
+        import os as os_module
         try:
-            adc_file = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
-            if not os.path.exists(adc_file):
-                st.error("🔐 Google Cloud認証が設定されていません")
-                st.markdown("""
-                **📋 認証設定方法:**
-                1. 左サイドバーの「システム設定」をクリック
-                2. 「🔐 Google Cloud認証」タブを開く
-                3. 認証情報を設定してください
-                """)
-                if st.button("🔧 認証設定に移動", type="primary"):
-                    st.session_state['redirect_to_settings'] = True
-                    st.rerun()
-                st.stop()
+            # サービスアカウントキーまたはADC認証をチェック
+            google_creds = os_module.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            if not google_creds:
+                adc_file = os_module.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+                if not os_module.path.exists(adc_file):
+                    st.error("🔐 Google Cloud認証が設定されていません")
+                    st.markdown("""
+                    **📋 認証設定方法:**
+                    1. 左サイドバーの「システム設定」をクリック
+                    2. 「🔐 Google Cloud認証」タブを開く
+                    3. 認証情報を設定してください
+                    """)
+                    if st.button("🔧 認証設定に移動", type="primary"):
+                        st.session_state['redirect_to_settings'] = True
+                        st.rerun()
+                    st.stop()
                 
         except Exception as e:
             st.error(f"認証チェックエラー: {e}")
