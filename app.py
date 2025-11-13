@@ -2518,6 +2518,82 @@ def update_app_setting(key, value, description="", category="general"):
     else:
         execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", (key, value, description, category))
 
+def batch_approve_all_drafts():
+    """全アカウントの下書き投稿を一括承認"""
+    try:
+        # 全ての下書き投稿を取得
+        draft_posts = execute_query("""
+            SELECT p.*, c.name as cast_name
+            FROM posts p
+            JOIN casts c ON p.cast_id = c.id
+            WHERE p.status = 'draft'
+            ORDER BY p.created_at DESC
+        """, fetch="all")
+        
+        if not draft_posts:
+            return 0, "下書き投稿が見つかりませんでした"
+        
+        approved_count = 0
+        error_count = 0
+        now = datetime.datetime.now()
+        today = now.date()
+        
+        for post in draft_posts:
+            try:
+                post_id = post['id']
+                
+                # 投稿時刻を生成または解析
+                if post['created_at']:
+                    created_dt = safe_datetime_parse(post['created_at'])
+                    if created_dt:
+                        # 作成時刻をベースに今日の同時刻を設定
+                        target_time = created_dt.time()
+                        target_datetime = datetime.datetime.combine(today, target_time)
+                        
+                        # 過去の場合は明日に設定
+                        if target_datetime <= now:
+                            tomorrow = today + datetime.timedelta(days=1)
+                            target_datetime = datetime.datetime.combine(tomorrow, target_time)
+                    else:
+                        # パース失敗時はランダム時刻（今日の未来時刻）
+                        import random
+                        random_hour = random.randint(now.hour + 1, 23) if now.hour < 23 else random.randint(7, 23)
+                        random_minute = random.randint(0, 59)
+                        target_datetime = datetime.datetime.combine(today if random_hour > now.hour else today + datetime.timedelta(days=1), 
+                                                                   datetime.time(random_hour, random_minute))
+                else:
+                    # created_atがない場合はランダム時刻
+                    import random
+                    random_hour = random.randint(now.hour + 1, 23) if now.hour < 23 else random.randint(7, 23)
+                    random_minute = random.randint(0, 59)
+                    target_datetime = datetime.datetime.combine(today if random_hour > now.hour else today + datetime.timedelta(days=1), 
+                                                               datetime.time(random_hour, random_minute))
+                
+                # 承認として保存
+                posted_at_str = target_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                execute_query("""
+                    UPDATE posts 
+                    SET status = 'approved', 
+                        posted_at = ?,
+                        scheduled_at = ?
+                    WHERE id = ?
+                """, (posted_at_str, posted_at_str, post_id))
+                
+                approved_count += 1
+                
+            except Exception as e:
+                print(f"投稿ID {post.get('id')} の承認エラー: {e}")
+                error_count += 1
+                continue
+        
+        if error_count > 0:
+            return approved_count, f"✅ {approved_count}件承認完了（{error_count}件エラー）"
+        else:
+            return approved_count, f"✅ {approved_count}件の投稿を一括承認しました"
+    
+    except Exception as e:
+        return 0, f"❌ 一括承認エラー: {str(e)}"
+
 def batch_schedule_all_approved_posts():
     """全アカウントの承認済み投稿を一括予約実行"""
     try:
@@ -2832,9 +2908,16 @@ def main():
         st.sidebar.warning("⚠️ キャストが登録されていません")
         st.session_state.global_selected_cast_id = None
     
-    # ==================== サイドバー: 全アカウント一括予約 ====================
+    # ==================== サイドバー: 全アカウント一括操作 ====================
     st.sidebar.divider()
     st.sidebar.subheader("🚀 一括操作")
+    
+    # 下書き投稿数を取得
+    draft_count = execute_query("""
+        SELECT COUNT(*) as count 
+        FROM posts 
+        WHERE status = 'draft'
+    """, fetch="one")['count']
     
     # 承認済み投稿数を取得
     approved_count = execute_query("""
@@ -2845,6 +2928,28 @@ def main():
         AND posted_at IS NOT NULL
     """, fetch="one")['count']
     
+    # 下書き一括承認
+    if draft_count > 0:
+        st.sidebar.info(f"📝 全アカウント下書き: {draft_count}件")
+        
+        if st.sidebar.button(
+            f"✅ 全アカウント一括承認 ({draft_count}件)",
+            type="secondary",
+            use_container_width=True,
+            help="全アカウントの下書き投稿を一括で承認します"
+        ):
+            with st.spinner("一括承認処理中..."):
+                count, message = batch_approve_all_drafts()
+                if count > 0:
+                    st.sidebar.success(message)
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.sidebar.error(message)
+    else:
+        st.sidebar.caption("📝 下書き投稿: 0件")
+    
+    # 承認済み一括予約
     if approved_count > 0:
         st.sidebar.info(f"📊 全アカウント承認済み: {approved_count}件")
         
