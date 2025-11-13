@@ -4619,6 +4619,29 @@ def main():
         # 画像投稿専用DBを初期化
         init_image_db()
         
+        # Vertex AI再初期化（AI画像投稿ページ用）
+        try:
+            import vertexai
+            from google.oauth2 import service_account
+            
+            # 環境変数からプロジェクトIDを取得
+            project_id = os_module.environ.get('GCP_PROJECT', 'aicast-472807')
+            location = 'us-central1'
+            
+            # サービスアカウントキー認証
+            credentials_path = os_module.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            if credentials_path and os_module.path.exists(credentials_path):
+                credentials = service_account.Credentials.from_service_account_file(credentials_path)
+                vertexai.init(project=project_id, location=location, credentials=credentials)
+                print(f"✅ AI画像投稿: Vertex AI初期化完了（サービスアカウント）")
+            else:
+                # ADC認証
+                vertexai.init(project=project_id, location=location)
+                print(f"✅ AI画像投稿: Vertex AI初期化完了（ADC）")
+        except Exception as init_error:
+            st.warning(f"⚠️ Vertex AI初期化エラー: {init_error}")
+            print(f"❌ AI画像投稿: Vertex AI初期化失敗: {init_error}")
+        
         # Geminiモデルの初期化（投稿管理と同じ処理）
         if 'gemini_model' not in st.session_state:
             try:
