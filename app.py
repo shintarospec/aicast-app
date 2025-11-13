@@ -2671,6 +2671,7 @@ def main():
     global project_id, location
     
     try:
+        import os
         import vertexai
         from google.oauth2 import service_account
         
