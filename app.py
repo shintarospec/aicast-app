@@ -2667,6 +2667,9 @@ def main():
     init_db()
     initialize_default_settings()  # デフォルト設定を初期化
 
+    # グローバル変数を参照
+    global project_id, location
+    
     try:
         import vertexai
         if 'auth_done' not in st.session_state:
