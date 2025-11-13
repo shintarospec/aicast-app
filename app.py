@@ -2518,6 +2518,73 @@ def update_app_setting(key, value, description="", category="general"):
     else:
         execute_query("INSERT INTO app_settings (key, value, description, category) VALUES (?, ?, ?, ?)", (key, value, description, category))
 
+def batch_schedule_all_approved_posts():
+    """全アカウントの承認済み投稿を一括予約実行"""
+    try:
+        # 全ての承認済み投稿を取得（未送信のみ）
+        approved_posts = execute_query("""
+            SELECT p.*, c.name as cast_name
+            FROM posts p
+            JOIN casts c ON p.cast_id = c.id
+            WHERE p.status = 'approved' 
+            AND (p.sent_status = 'not_sent' OR p.sent_status IS NULL)
+            AND p.posted_at IS NOT NULL
+            ORDER BY p.posted_at ASC
+        """, fetch="all")
+        
+        if not approved_posts:
+            return 0, "承認済み投稿が見つかりませんでした"
+        
+        scheduled_count = 0
+        error_count = 0
+        now = datetime.datetime.now()
+        
+        for post in approved_posts:
+            try:
+                post_id = post['id']
+                
+                # 予約時刻を解析
+                target_datetime = safe_datetime_parse(post['posted_at'])
+                if not target_datetime:
+                    error_count += 1
+                    continue
+                
+                # 過去時刻の場合は明日の同時刻に調整
+                if target_datetime <= now:
+                    if target_datetime.date() == now.date():
+                        # 今日の過去時刻 → 明日
+                        tomorrow = now.date() + datetime.timedelta(days=1)
+                        target_datetime = datetime.datetime.combine(tomorrow, target_datetime.time())
+                    else:
+                        # 過去の日付 → 明日の同時刻
+                        tomorrow = now.date() + datetime.timedelta(days=1)
+                        target_datetime = datetime.datetime.combine(tomorrow, target_datetime.time())
+                
+                # スケジュール予約として保存
+                scheduled_at_str = target_datetime.strftime('%Y-%m-%d %H:%M:%S')
+                execute_query("UPDATE posts SET scheduled_at = ?, sent_status = 'scheduled' WHERE id = ?", 
+                            (scheduled_at_str, post_id))
+                
+                # 予約履歴を記録
+                scheduled_at_log = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                execute_query("INSERT INTO send_history (post_id, destination, sent_at, scheduled_datetime, status) VALUES (?, ?, ?, ?, ?)", 
+                            (post_id, "x_api", scheduled_at_log, scheduled_at_str, 'scheduled'))
+                
+                scheduled_count += 1
+                
+            except Exception as e:
+                print(f"投稿ID {post.get('id')} の予約エラー: {e}")
+                error_count += 1
+                continue
+        
+        if error_count > 0:
+            return scheduled_count, f"✅ {scheduled_count}件予約完了（{error_count}件エラー）"
+        else:
+            return scheduled_count, f"✅ {scheduled_count}件の投稿を一括予約しました"
+    
+    except Exception as e:
+        return 0, f"❌ 一括予約エラー: {str(e)}"
+
 def main():
     st.set_page_config(layout="wide")
     load_css("style.css")
@@ -2764,6 +2831,39 @@ def main():
     else:
         st.sidebar.warning("⚠️ キャストが登録されていません")
         st.session_state.global_selected_cast_id = None
+    
+    # ==================== サイドバー: 全アカウント一括予約 ====================
+    st.sidebar.divider()
+    st.sidebar.subheader("🚀 一括操作")
+    
+    # 承認済み投稿数を取得
+    approved_count = execute_query("""
+        SELECT COUNT(*) as count 
+        FROM posts 
+        WHERE status = 'approved' 
+        AND (sent_status = 'not_sent' OR sent_status IS NULL)
+        AND posted_at IS NOT NULL
+    """, fetch="one")['count']
+    
+    if approved_count > 0:
+        st.sidebar.info(f"📊 全アカウント承認済み: {approved_count}件")
+        
+        if st.sidebar.button(
+            f"📅 全アカウント一括予約 ({approved_count}件)",
+            type="primary",
+            use_container_width=True,
+            help="全アカウントの承認済み投稿を一括でスケジュール予約します"
+        ):
+            with st.spinner("一括予約処理中..."):
+                count, message = batch_schedule_all_approved_posts()
+                if count > 0:
+                    st.sidebar.success(message)
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.sidebar.error(message)
+    else:
+        st.sidebar.caption("📊 承認済み投稿: 0件")
     
     # ==================== サイドバー下部: AIモデル設定 ====================
     
