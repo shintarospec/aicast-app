@@ -4578,6 +4578,9 @@ def main():
                 display_retweet_schedules(selected_cast_id)
 
     elif page == "🎨 AI画像投稿":
+        # osモジュールを明示的にインポート（AI画像機能内で使用）
+        import os as os_module
+        
         if not AI_IMAGE_AVAILABLE:
             st.error("🚫 AI画像投稿機能が利用できません")
             st.info("必要なモジュールがインストールされていない可能性があります")
@@ -4591,7 +4594,6 @@ def main():
             st.stop()
         
         # 認証状況をチェック（環境変数ベース）
-        import os as os_module
         try:
             # サービスアカウントキーまたはADC認証をチェック
             google_creds = os_module.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
@@ -4717,7 +4719,7 @@ def main():
                         if st.button("📁 画像を保存", key="save_uploaded_image", type="primary"):
                             try:
                                 # temp_imagesディレクトリを作成
-                                os.makedirs("temp_images", exist_ok=True)
+                                os_module.makedirs("temp_images", exist_ok=True)
                                 
                                 # ファイルを保存
                                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -5035,9 +5037,9 @@ def main():
                             st.session_state.uploader_reset_counter = st.session_state.get('uploader_reset_counter', 0) + 1
                             
                             # 一時画像ファイルを削除
-                            if image_path_to_cleanup and os.path.exists(image_path_to_cleanup):
+                            if image_path_to_cleanup and os_module.path.exists(image_path_to_cleanup):
                                 try:
-                                    os.remove(image_path_to_cleanup)
+                                    os_module.remove(image_path_to_cleanup)
                                 except Exception as e:
                                     pass  # エラーは無視
                             
@@ -5115,9 +5117,9 @@ def main():
                                         st.session_state.uploader_reset_counter = st.session_state.get('uploader_reset_counter', 0) + 1
                                         
                                         # 一時画像ファイルを削除
-                                        if image_path_to_cleanup and os.path.exists(image_path_to_cleanup):
+                                        if image_path_to_cleanup and os_module.path.exists(image_path_to_cleanup):
                                             try:
-                                                os.remove(image_path_to_cleanup)
+                                                os_module.remove(image_path_to_cleanup)
                                             except Exception as e:
                                                 pass  # エラーは無視
                                         
@@ -5209,7 +5211,7 @@ def main():
                                 st.error(f"エラー: {post['error_message']}")
                         
                         with col2:
-                            if post['generated_image_path'] and os.path.exists(post['generated_image_path']):
+                            if post['generated_image_path'] and os_module.path.exists(post['generated_image_path']):
                                 st.image(post['generated_image_path'], caption="生成画像")
                             else:
                                 st.info("画像ファイルが見つかりません")
