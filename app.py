@@ -2912,20 +2912,22 @@ def main():
     st.sidebar.divider()
     st.sidebar.subheader("🚀 一括操作")
     
-    # 下書き投稿数を取得
+    # 下書き投稿数を取得（有効なキャストのみ）
     draft_count = execute_query("""
         SELECT COUNT(*) as count 
-        FROM posts 
-        WHERE status = 'draft'
+        FROM posts p
+        JOIN casts c ON p.cast_id = c.id
+        WHERE p.status = 'draft'
     """, fetch="one")['count']
     
-    # 承認済み投稿数を取得
+    # 承認済み投稿数を取得（有効なキャストのみ）
     approved_count = execute_query("""
         SELECT COUNT(*) as count 
-        FROM posts 
-        WHERE status = 'approved' 
-        AND (sent_status = 'not_sent' OR sent_status IS NULL)
-        AND posted_at IS NOT NULL
+        FROM posts p
+        JOIN casts c ON p.cast_id = c.id
+        WHERE p.status = 'approved' 
+        AND (p.sent_status = 'not_sent' OR p.sent_status IS NULL)
+        AND p.posted_at IS NOT NULL
     """, fetch="one")['count']
     
     # 下書き一括承認
