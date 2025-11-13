@@ -1,7 +1,10 @@
 #!/bin/bash
 # AIcast Room を サービスアカウントキー認証で起動
 
-export GOOGLE_APPLICATION_CREDENTIALS="/workspaces/aicast-app/credentials/service-account-key.json"
+# スクリプトのディレクトリを取得
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+export GOOGLE_APPLICATION_CREDENTIALS="${SCRIPT_DIR}/credentials/service-account-key.json"
 export GCP_PROJECT="aicast-472807"
 
 echo "🔐 サービスアカウント認証を設定しました"
