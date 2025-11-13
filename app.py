@@ -4750,7 +4750,7 @@ def main():
             with col2:
                 # サイドパネル：投稿設定
                 if (st.session_state.get('generated_image_path') and 
-                    os.path.exists(st.session_state.generated_image_path) and
+                    os_module.path.exists(st.session_state.generated_image_path) and
                     st.session_state.get('selected_cast_id') and
                     st.session_state.get('image_source')):
                     st.markdown("### 📤 投稿設定")
