@@ -726,7 +726,7 @@ def get_sample_posts_prompt(cast_id, category=None, limit=100):
 def get_style_guidance_prompt(cast_id):
     """口調・文体ガイドを取得"""
     persona = execute_query(
-        "SELECT first_person, speech_style, catchphrase FROM persona WHERE cast_id = ?",
+        "SELECT first_person, speech_style, catchphrase FROM casts WHERE id = ?",
         (cast_id,), fetch="one"
     )
     
