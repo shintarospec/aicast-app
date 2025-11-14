@@ -723,18 +723,135 @@ def get_sample_posts_prompt(cast_id, category=None, limit=100):
     return "\n".join(sections)
 
 
+def get_style_guidance_prompt(cast_id):
+    """口調・文体ガイドを取得"""
+    persona = execute_query(
+        "SELECT first_person, speech_style, catchphrase FROM persona WHERE cast_id = ?",
+        (cast_id,), fetchone=True
+    )
+    
+    if not persona:
+        return ""
+    
+    sections = ["\n## 口調・文体ガイド"]
+    
+    if persona[0]:  # first_person
+        sections.append(f"- 一人称: {persona[0]}")
+    if persona[1]:  # speech_style
+        sections.append(f"- 話し方: {persona[1]}")
+    if persona[2]:  # catchphrase
+        sections.append(f"- 決め台詞: {persona[2]}")
+    
+    sections.extend([
+        "\n### 文体ルール",
+        "- 簡潔で自然な口語表現を使う",
+        "- 絵文字は1投稿あたり0-2個まで",
+        "- ハッシュタグは文脈に自然に溶け込ませる",
+        "- 改行は最大1回まで（長文は避ける）"
+    ])
+    
+    return "\n".join(sections)
+
+
+def get_emotional_elements_prompt():
+    """感情表現のガイダンスを生成"""
+    return """\n## 感情表現ガイド
+- 喜び: 素直に表現するが大げさにしない
+- 驚き: リアクションは控えめに
+- 共感: 押し付けがましくなく、寄り添う
+- 疑問: 独り言風に自然に投げかける
+- 発見: 「へぇ」「なるほど」など軽いトーンで
+
+### バリエーション指針
+- 毎回同じパターンを避ける
+- 時には疑問形、時には断定形
+- 時には体験談、時には一般論
+- 感嘆符（！）は控えめに使用"""
+
+
+def get_current_context_prompt():
+    """時事・季節コンテキストを生成"""
+    now = datetime.datetime.now(JST)
+    month = now.month
+    day = now.day
+    weekday = now.strftime("%A")  # Monday, Tuesday, etc.
+    hour = now.hour
+    
+    # 季節判定
+    if month in [3, 4, 5]:
+        season = "春"
+        seasonal_topics = ["桜", "新生活", "花粉", "入学式", "新緑"]
+    elif month in [6, 7, 8]:
+        season = "夏"
+        seasonal_topics = ["梅雨", "夏休み", "花火", "海", "暑さ対策"]
+    elif month in [9, 10, 11]:
+        season = "秋"
+        seasonal_topics = ["紅葉", "食欲の秋", "読書", "運動会", "ハロウィン"]
+    else:  # 12, 1, 2
+        season = "冬"
+        seasonal_topics = ["雪", "クリスマス", "正月", "受験", "寒さ対策"]
+    
+    # 時間帯判定
+    if 5 <= hour < 12:
+        time_context = "朝"
+    elif 12 <= hour < 17:
+        time_context = "昼"
+    elif 17 <= hour < 21:
+        time_context = "夕方〜夜"
+    else:
+        time_context = "深夜"
+    
+    # 特別な日付チェック
+    special_days = {
+        (1, 1): "元日",
+        (2, 14): "バレンタインデー",
+        (3, 14): "ホワイトデー",
+        (4, 1): "エイプリルフール",
+        (7, 7): "七夕",
+        (10, 31): "ハロウィン",
+        (12, 24): "クリスマスイブ",
+        (12, 25): "クリスマス",
+        (12, 31): "大晦日"
+    }
+    
+    special_event = special_days.get((month, day), "")
+    
+    context_parts = [
+        f"\n## 現在の時事・季節コンテキスト",
+        f"- 日時: {month}月{day}日（{weekday}）{time_context}",
+        f"- 季節: {season}"
+    ]
+    
+    if special_event:
+        context_parts.append(f"- 特別な日: {special_event}")
+    
+    context_parts.extend([
+        f"- 関連トピック例: {', '.join(seasonal_topics)}",
+        "",
+        "### 時事反映のヒント",
+        "- 上記の季節・時間帯に自然に関連する内容を織り込むことができます",
+        "- 強制的に季節ネタを入れる必要はありません（自然な範囲で）",
+        "- 特別な日の場合は、さりげなく言及するのも良いでしょう"
+    ])
+    
+    return "\n".join(context_parts)
+
+
 def build_full_prompt(cast_id, situation_or_instruction, char_limit=140, is_custom_instruction=False):
     """フルプロンプトを構築（新プロンプト構造専用）
     
-    新プロンプト構造：
+    新プロンプト構造（11段階）:
     1. 基本ペルソナ（必須3項目：name, nickname, age）
-    2. アカウント運営指針（オプション）
-    3. グローバル指針（オプション）
-    4. 詳細ペルソナ（オプション）
-    5. サンプルプロフィール（オプション）
-    6. サンプル投稿（オプション）
-    7. シチュエーションまたは指示
-    8. 生成ルール
+    2. アカウント運営指針（簡略版）
+    3. グローバル指針・アドバイス
+    4. 詳細ペルソナ（オプション項目）
+    5. 口調・文体ガイド（NEW）
+    6. 感情表現ガイド（NEW）
+    7. サンプル投稿
+    8. 時事・季節コンテキスト（NEW）
+    9. 状況・指示（カスタムまたはランダム選択）
+    10. コミュニティ参加パターン（NEW）
+    11. 生成ルール
     
     Args:
         cast_id: キャストID
@@ -768,28 +885,49 @@ def build_full_prompt(cast_id, situation_or_instruction, char_limit=140, is_cust
     if detailed_persona:
         sections.append(detailed_persona)
     
-    # 5. サンプルプロフィール（オプション）
-    sample_profile = get_sample_profile_prompt(cast_id)
-    if sample_profile:
-        sections.append(sample_profile)
+    # 5. 口調・文体ガイド（NEW）
+    style_guide = get_style_guidance_prompt(cast_id)
+    if style_guide:
+        sections.append(style_guide)
     
-    # 6. サンプル投稿（オプション）
+    # 6. 感情表現ガイド（NEW）
+    sections.append(get_emotional_elements_prompt())
+    
+    # 7. サンプル投稿
     sample_posts = get_sample_posts_prompt(cast_id)
     if sample_posts:
         sections.append(sample_posts)
     
-    # 7. シチュエーションまたは指示
+    # 8. 時事・季節コンテキスト（NEW）
+    sections.append(get_current_context_prompt())
+    
+    # 9. 状況・指示（カスタムまたはランダム選択）
     if is_custom_instruction:
         sections.append(f"## 投稿生成の指示\n{situation_or_instruction}")
     else:
         sections.append(f"## シチュエーション\n{situation_or_instruction}")
     
-    # 8. 生成ルール
+    # 10. コミュニティ参加パターン（NEW）
+    community_pattern = """
+## コミュニティ参加パターン
+- 独り言: 自分の考えや気づきをつぶやく
+- 共感投稿: 他の人も感じているであろうことを言語化
+- 質問投げかけ: フォロワーに軽く問いかける（答えを強要しない）
+- 発見シェア: 小さな発見や気づきを共有
+- 日常報告: 何気ない日常の一コマを切り取る
+
+### 投稿のバリエーション
+同じパターンの連続を避け、多様な切り口で投稿してください。
+"""
+    sections.append(community_pattern)
+    
+    # 11. 生成ルール
     generation_rules = f"""
 ## 生成ルール
 - 上記のキャラクター設定・運営指針・グローバル指針・サンプルに基づいて投稿を生成してください
 - 文字数は{char_limit}文字以内に収めてください
 - サンプル投稿がある場合は、同じような雰囲気・トーン・スタイルで書いてください
+- 時事・季節コンテキストは自然な範囲で反映してください（強制ではありません）
 - 改行は適切に使用し、読みやすさを重視してください
 - 投稿内容のみを生成し、説明や前置きは不要です
 """
