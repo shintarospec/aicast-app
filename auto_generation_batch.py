@@ -226,15 +226,13 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
                 print(f"   🔍 auto_approve値: {auto_approve} (type: {type(auto_approve)})")
                 if auto_approve >= 1:
                     # 承認済みとして保存（status='approved'）
-                    execute_query("""
+                    post_id = execute_query("""
                         INSERT INTO posts (
                             cast_id, content, theme, 
                             status, posted_at, scheduled_at,
                             created_at, generated_at
                         ) VALUES (?, ?, ?, 'approved', ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
                     """, (cast_id, generated_text, category_text, scheduled_time_str, scheduled_time_str))
-                    
-                    post_id = execute_query("SELECT last_insert_rowid() as id", fetch="one")['id']
                     
                     # 完全自動（auto_approve=2）の場合は即座に予約
                     if auto_approve == 2:
