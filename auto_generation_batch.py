@@ -223,6 +223,7 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
                 scheduled_time_str = scheduled_time.strftime('%Y-%m-%d %H:%M:%S')
                 
                 # 自動承認設定に応じて処理
+                print(f"   🔍 auto_approve値: {auto_approve} (type: {type(auto_approve)})")
                 if auto_approve >= 1:
                     # 承認済みとして保存（status='approved'）
                     execute_query("""
