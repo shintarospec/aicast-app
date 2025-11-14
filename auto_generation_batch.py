@@ -238,18 +238,20 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
                     # 完全自動（auto_approve=2）の場合は即座に予約
                     if auto_approve == 2:
                         try:
-                            from app import send_to_google_sheets
-                            success, message = send_to_google_sheets(
-                                cast_name=cast_name,
-                                post_content=generated_text,
-                                scheduled_datetime=scheduled_time,
-                                cast_id=cast_id
-                            )
-                            if success:
-                                execute_query("UPDATE posts SET sent_status = 'scheduled' WHERE id = ?", (post_id,))
-                                print(f"   📅 予約完了: {scheduled_time_str}")
-                            else:
-                                print(f"   ⚠️ 予約失敗: {message}")
+                            # scheduled_at を更新して予約状態に
+                            execute_query("UPDATE posts SET sent_status = 'scheduled' WHERE id = ?", (post_id,))
+                            
+                            # 予約履歴を記録
+                            import pytz
+                            JST = pytz.timezone('Asia/Tokyo')
+                            scheduled_at_log = datetime.datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+                            execute_query("""
+                                INSERT INTO send_history 
+                                (post_id, destination, sent_at, scheduled_datetime, status) 
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (post_id, "x_api", scheduled_at_log, scheduled_time_str, 'scheduled'))
+                            
+                            print(f"   📅 予約完了: {scheduled_time_str}")
                         except Exception as e:
                             print(f"   ⚠️ 予約エラー: {e}")
                     else:
