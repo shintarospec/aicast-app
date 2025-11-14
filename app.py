@@ -727,7 +727,7 @@ def get_style_guidance_prompt(cast_id):
     """口調・文体ガイドを取得"""
     persona = execute_query(
         "SELECT first_person, speech_style, catchphrase FROM persona WHERE cast_id = ?",
-        (cast_id,), fetchone=True
+        (cast_id,), fetch="one"
     )
     
     if not persona:
