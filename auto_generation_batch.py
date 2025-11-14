@@ -26,7 +26,7 @@ if 'GCP_PROJECT' not in os.environ:
 
 # app.pyから必要な関数をインポート
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from app import execute_query
+from app import execute_query, build_full_prompt
 
 # ロックファイルのパス
 LOCK_FILE = os.path.join(os.path.dirname(__file__), '.auto_generation.lock')
@@ -184,23 +184,18 @@ def generate_posts_for_cast(setting: Dict[str, Any]) -> Dict[str, Any]:
         try:
             print(f"\n📝 投稿案 {i+1}/{posts_per_day} を生成中...")
             
-            # ランダムにサンプル投稿を選択
+            # ランダムにサンプル投稿を選択（指示文として使用）
             selected_sample = random.choice(sample_posts)
             instruction_text = selected_sample['post_content']
             category_text = selected_sample['category'] or "一般"
             
-            # プロンプトを構築（app.pyのbuild_full_prompt相当）
-            prompt = f"""あなたは{cast_name}({cast_nickname})としてSNS投稿を作成します。
-
-以下の指示に従って、投稿案を1つだけ作成してください：
-{instruction_text}
-
-要件：
-- 140文字以内
-- {cast_name}のキャラクターに合った口調・表現
-- カテゴリ: {category_text}
-- 投稿文のみを出力（説明や例示は不要）
-"""
+            # app.pyのbuild_full_promptを使用して完全なプロンプトを構築
+            prompt = build_full_prompt(
+                cast_id=cast_id,
+                situation_or_instruction=instruction_text,
+                char_limit=140,
+                is_custom_instruction=True  # サンプル投稿を指示として扱う
+            )
             
             # Geminiで投稿文を生成
             response = model.generate_content(prompt)
