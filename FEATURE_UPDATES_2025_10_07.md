@@ -1310,7 +1310,202 @@ widget_value = st.text_input("Label", key="widget_key")
 
 ---
 
-**最終更新**: 2025年11月11日  
-**文書バージョン**: 1.5  
-**対象システム**: AIcast Room v2025.11.11
+## 🔧 自動生成投稿の完全自動予約機能 実装完了
+### 実装日: 2025年11月14日
+
+#### **問題背景**
+- **症状**: `auto_approve=2`（完全自動）設定のキャストで、投稿生成後に自動予約が実行されない
+- **現象**: `status='approved'`（承認済み）まで進むが、`sent_status='scheduled'`（予約済み）に更新されない
+- **影響**: 手動でGUIから一括予約を実行する必要があり、完全自動化が実現できていなかった
+
+#### **根本原因の特定**
+
+##### 1. `execute_query`関数のStreamlit依存エラー
+```python
+# 問題のあったコード（app.py）
+except sqlite3.Error as e:
+    st.error(f"データベースエラー: {e}")  # バッチ実行時にエラー
+    return None if fetch else False
+```
+
+**問題点**:
+- バッチスクリプト（`auto_generation_batch.py`）から呼び出された際、Streamlitが未初期化
+- `st.error()`呼び出しで例外が発生し、`conn.commit()`が実行されない
+- DB更新がロールバックされ、`sent_status`が更新されない
+
+##### 2. `post_id`取得方法の誤り
+```python
+# 問題のあったコード（auto_generation_batch.py）
+execute_query("INSERT INTO posts ...")
+post_id = execute_query("SELECT last_insert_rowid() as id", fetch="one")['id']
+# ↑ 別のDB接続で実行されるため、常に0を返す
+```
+
+**問題点**:
+- `execute_query`は毎回新しいDB接続を作成
+- `last_insert_rowid()`は接続ごとに管理されるため、別接続では0を返す
+- `UPDATE posts SET sent_status = 'scheduled' WHERE id = 0` は何も更新しない
+
+#### **実装内容**
+
+##### 修正1: execute_query関数のバッチ実行対応
+```python
+# 修正後のコード（app.py）
+except sqlite3.Error as e:
+    # Streamlitが使用可能な場合のみst.error()を呼び出す
+    try:
+        if "UNIQUE constraint failed" in str(e):
+            st.error(f"データベースエラー: 同じ内容が既に存在するため、追加できません。")
+        else:
+            st.error(f"データベースエラー: {e}")
+    except:
+        # Streamlit未使用時（バッチ実行時など）はprintで出力
+        print(f"❌ データベースエラー: {e}")
+    return None if fetch else False
+```
+
+**効果**:
+- Streamlit未使用時でもエラーハンドリングが正常動作
+- `commit()`が確実に実行される
+- バッチ実行時のDB更新が保証される
+
+##### 修正2: post_id取得方法の改善
+```python
+# 修正後のコード（auto_generation_batch.py）
+post_id = execute_query("""
+    INSERT INTO posts (
+        cast_id, content, theme, 
+        status, posted_at, scheduled_at,
+        created_at, generated_at
+    ) VALUES (?, ?, ?, 'approved', ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+""", (cast_id, generated_text, category_text, scheduled_time_str, scheduled_time_str))
+# ↑ execute_queryがINSERT時に返すlastrowidを直接使用
+```
+
+**効果**:
+- 正しい`post_id`が取得できる
+- `UPDATE`文と`INSERT`文（send_history）が正常に実行される
+- 予約処理が完全に動作する
+
+#### **動作フロー（完全自動モード）**
+
+```
+1. 自動生成バッチ実行（cron: 5分間隔）
+   ↓
+2. 設定時刻に達したキャストを検索
+   ↓
+3. Gemini APIで投稿案を生成
+   ↓
+4. auto_approve=2の場合：
+   ├─ INSERT INTO posts (status='approved', ...) 
+   ├─ post_id = lastrowid を取得
+   ├─ UPDATE posts SET sent_status='scheduled' WHERE id=post_id
+   └─ INSERT INTO send_history (post_id, status='scheduled', ...)
+   ↓
+5. 完了（GUIのスケジュール投稿管理に表示）
+```
+
+#### **検証結果**
+
+##### テスト実行（2025-11-14 13:00）
+```
+🚀 投稿案自動生成バッチ実行開始
+📝 投稿案 1/10 を生成中...
+   🔧 デバッグ: post_id=2724, scheduled_time=2025-11-15 20:08:00
+   🔧 UPDATE結果: None
+   🔧 INSERT結果: 2634
+   📅 予約完了: 2025-11-15 20:08:00
+✅ 投稿案 1 生成成功
+...（省略）...
+```
+
+##### データベース確認
+```sql
+SELECT id, status, sent_status, scheduled_at 
+FROM posts WHERE id >= 2724 AND id <= 2733;
+
+-- 結果（全10件）
+2724|approved|scheduled|2025-11-15 20:08:00
+2725|approved|scheduled|2025-11-17 10:52:00
+2726|approved|scheduled|2025-11-17 13:52:00
+...
+```
+
+##### send_history確認
+```sql
+SELECT post_id, destination, status, scheduled_datetime 
+FROM send_history WHERE id >= 2634;
+
+-- 結果（全10件）
+2724|x_api|scheduled|2025-11-15 20:08:00
+2725|x_api|scheduled|2025-11-17 10:52:00
+...
+```
+
+✅ **全ての投稿で予約処理が正常に完了**
+
+#### **影響範囲**
+
+##### 修正されたファイル
+1. `app.py`
+   - `execute_query`関数のエラーハンドリング改善
+   - バッチ実行時の互換性確保
+
+2. `auto_generation_batch.py`
+   - `post_id`取得ロジックの修正
+   - 予約処理の確実な実行
+
+##### 影響を受ける機能
+- ✅ 投稿案自動生成（`auto_approve=2`の完全自動モード）
+- ✅ スケジュール投稿管理画面の表示
+- ✅ Cloud Functions経由のX API自動投稿
+
+##### 影響を受けない機能
+- 手動での投稿生成・承認・予約
+- GUI操作全般
+- リツイート予約機能
+
+#### **運用上の注意点**
+
+1. **cron実行間隔**: 5分間隔で動作（変更不要）
+2. **自動生成時刻**: `auto_generation_settings`テーブルで管理
+3. **完全自動設定**: `auto_approve=2`のキャストのみ予約まで自動実行
+4. **手動承認設定**: `auto_approve=1`は承認まで（予約は手動）
+5. **ログ確認**: `/home/ubuntu/aicast-app/auto_generation.log`
+
+#### **今後の自動運用**
+
+```
+毎日深夜01:00〜06:48に設定されたキャスト別自動生成
+├─ auto_approve=0: 生成のみ（下書き）
+├─ auto_approve=1: 生成→承認（予約は手動）
+└─ auto_approve=2: 生成→承認→予約（完全自動）★
+    ↓
+Cloud Functions（scheduled-post）が設定時刻に自動投稿
+```
+
+#### **コミット履歴**
+
+| コミットID | 日時 | 内容 |
+|-----------|------|------|
+| `78ea961e` | 2025-11-14 | fix: execute_query関数をバッチ実行対応に修正 |
+| `5228c1f3` | 2025-11-14 | fix: post_id取得方法を修正（INSERT文のlastrowidを直接使用） |
+| `afa4019c` | 2025-11-14 | clean: デバッグログ削除 - 自動予約機能が正常動作することを確認 |
+
+#### **デプロイ情報**
+- **環境**: VPS (153.126.194.114)
+- **デプロイ日時**: 2025年11月14日 13:00 (JST)
+- **動作確認**: 本番環境で完全自動予約が正常動作することを確認
+- **ブランチ**: `clean-production`
+
+#### **関連ドキュメント**
+- `.github/copilot-instructions.md`: 開発・運用ワークフロー
+- `AUTO_GENERATION_SPECIFICATION.md`: 自動生成仕様
+- `README_SAKURA_VPS.md`: VPS運用ガイド
+
+---
+
+**最終更新**: 2025年11月14日  
+**文書バージョン**: 1.6  
+**対象システム**: AIcast Room v2025.11.14
 

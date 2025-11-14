@@ -33,9 +33,17 @@
   - `GCP_PROJECT`（Google CloudプロジェクトID）、`GOOGLE_APPLICATION_CREDENTIALS`（認証ファイルパス）を優先。
 - **DB操作**:  
   - 必ず`execute_query`関数を利用。直接`sqlite3.connect`禁止。
+  - `execute_query`はStreamlit未使用時（バッチ実行）でも動作するようエラーハンドリング実装済み。
+  - INSERT文実行時は`lastrowid`を返すので、`post_id = execute_query("INSERT ...")`で直接取得可能。
 - **投稿ワークフロー**:
   - `draft` → `approved` → `sent` の状態遷移
   - 送信先は拡張可能（現在：Google Sheets、将来：X API、外部サーバー）
+- **自動生成・予約**:
+  - `auto_generation_batch.py`がcron（5分間隔）で実行
+  - `auto_approve=0`: 下書きのみ生成
+  - `auto_approve=1`: 承認まで自動（予約は手動）
+  - `auto_approve=2`: **完全自動**（生成→承認→予約まで自動実行）
+  - 予約処理: `sent_status='scheduled'`更新 + `send_history`レコード追加
 - **UIカスタマイズ**:  
   - `style.css`でStreamlitコンポーネントのデザイン調整。
 - **キャスト表示**:
@@ -44,6 +52,7 @@
   - 認証・依存関係エラーはREADME記載のコマンドで復旧。
 - **ログ**:  
   - 本番は`app.log`に出力。`tail -f app.log`で監視。
+  - 自動生成は`auto_generation.log`に出力。
 
 ## 依存関係・外部連携
 
