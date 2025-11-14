@@ -374,10 +374,15 @@ def execute_query(query, params=(), fetch=None):
             result = cursor.lastrowid if cursor.lastrowid else None
         return result
     except sqlite3.Error as e:
-        if "UNIQUE constraint failed" in str(e):
-            st.error(f"データベースエラー: 同じ内容が既に存在するため、追加できません。")
-        else:
-            st.error(f"データベースエラー: {e}")
+        # Streamlitが使用可能な場合のみst.error()を呼び出す
+        try:
+            if "UNIQUE constraint failed" in str(e):
+                st.error(f"データベースエラー: 同じ内容が既に存在するため、追加できません。")
+            else:
+                st.error(f"データベースエラー: {e}")
+        except:
+            # Streamlit未使用時（バッチ実行時など）はprintで出力
+            print(f"❌ データベースエラー: {e}")
         return None if fetch else False
     finally:
         if conn:
