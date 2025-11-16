@@ -2857,7 +2857,10 @@ def batch_schedule_all_approved_posts():
         return 0, f"❌ 一括予約エラー: {str(e)}"
 
 def main():
-    st.set_page_config(layout="wide")
+    st.set_page_config(
+        page_title="AIcast Room",
+        layout="wide"
+    )
     load_css("style.css")
     init_db()
     initialize_default_settings()  # デフォルト設定を初期化
