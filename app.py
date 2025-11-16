@@ -6375,6 +6375,12 @@ def main():
                                              row.get('dislikes', ''), row.get('dream', ''), row.get('secret', ''))
                                         )
                                         cast_id = execute_query("SELECT id FROM casts WHERE name = ?", (row['name'],), fetch="one")['id']
+                                        
+                                        # 新規キャスト作成時に自動生成設定を初期化
+                                        execute_query(
+                                            "INSERT INTO auto_generation_settings (cast_id, enabled, auto_approve, posts_per_day) VALUES (?, ?, ?, ?)",
+                                            (cast_id, 1, 2, 3)
+                                        )
                                     
                                     # 詳細ペルソナ
                                     if any([row.get('archetype'), row.get('residence'), row.get('family_structure')]):
