@@ -1,5 +1,5 @@
 # AIcast Room 機能追加・改修仕様書
-## 更新日: 2025年10月7日〜11月14日
+## 更新日: 2025年10月7日〜11月16日
 
 ---
 
@@ -7,7 +7,13 @@
 
 本文書は、2025年10月7日以降に実施されたAIcast Roomの機能追加・改修内容をまとめた仕様書です。
 
-### 最新更新（2025年11月14日）
+### 最新更新（2025年11月16日）
+
+**新規キャスト作成時の自動生成設定初期化を実装:**
+
+19. **auto_generation_settings自動初期化** - 新規キャスト作成時に完全自動化設定を適用
+
+### 過去の更新（2025年11月14日）
 
 **プロンプト品質向上と時事ネタ反映機能を追加:**
 
@@ -1870,7 +1876,7 @@ if 5 <= hour < 12:
 
 ## 📝 まとめ
 
-2025年11月14日時点で、以下の改善を完了：
+2025年11月16日時点で、以下の改善を完了：
 
 **✅ 完了した改善:**
 - プロンプト構造の拡張（8段階→11段階）
@@ -1879,12 +1885,147 @@ if 5 <= hour < 12:
 - 感情表現の具体化
 - NGパターン・推奨パターンの明示
 - コミュニティ参加パターンの詳細化
+- **新規キャスト作成時の自動生成設定初期化**
 
 **🎯 期待される効果:**
 - より自然で人間らしい投稿
 - 時間帯に最適化されたトーン
 - 時事性の高い投稿
 - 高い多様性と品質の安定化
+- **新規キャスト追加時の設定作業不要化**
+
+---
+
+## 19. 新規キャスト作成時のauto_generation_settings自動初期化
+
+### **問題背景**
+
+**発生日**: 2025年11月16日
+
+**問題内容**:
+- 新規キャスト（sabotenheart, cast_id=95）の自動投稿が予約まで自動化されていなかった
+- `auto_generation_settings`テーブルに`auto_approve=1`（承認のみ）で設定されていた
+- 期待値は`auto_approve=2`（完全自動: 生成→承認→予約）
+
+**根本原因**:
+- CSVインポート経由で新規キャストを作成した際、`auto_generation_settings`テーブルへのレコード自動挿入が行われていなかった
+- 既存キャストは手動設定で`auto_approve=2`になっていたが、新規作成時のデフォルト動作が実装されていなかった
+
+### **実装内容**
+
+#### **修正ファイル**: `app.py`
+
+**修正箇所**: CSVインポート時の新規キャスト作成処理（line 6362-6382）
+
+```python
+else:
+    execute_query(
+        """INSERT INTO casts (name, nickname, age, birthday, personality, strength, weakness, 
+        first_person, speech_style, catchphrase, occupation, hobby, likes, dislikes, dream, secret)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (row['name'], row.get('nickname', ''), row.get('age', ''), row.get('birthday', ''),
+         row.get('personality', ''), row.get('strength', ''), row.get('weakness', ''),
+         row.get('first_person', ''), row.get('speech_style', ''), row.get('catchphrase', ''),
+         row.get('occupation', ''), row.get('hobby', ''), row.get('likes', ''),
+         row.get('dislikes', ''), row.get('dream', ''), row.get('secret', ''))
+    )
+    cast_id = execute_query("SELECT id FROM casts WHERE name = ?", (row['name'],), fetch="one")['id']
+    
+    # 新規キャスト作成時に自動生成設定を初期化
+    execute_query(
+        "INSERT INTO auto_generation_settings (cast_id, enabled, auto_approve, posts_per_day) VALUES (?, ?, ?, ?)",
+        (cast_id, 1, 2, 3)
+    )
+```
+
+#### **デフォルト設定値**
+
+| フィールド | 値 | 意味 |
+|-----------|---|------|
+| `enabled` | `1` | 自動生成: 有効 |
+| `auto_approve` | `2` | 完全自動（生成→承認→予約まで自動実行） |
+| `posts_per_day` | `3` | 1日3件生成 |
+
+**`auto_approve`の動作仕様**:
+- `0`: 下書きのみ生成
+- `1`: 承認まで自動（予約は手動）
+- `2`: **完全自動**（生成→承認→予約まで自動実行）
+
+### **影響範囲**
+
+**修正前の影響を受けたキャスト**:
+- cast_id=73以降の新規作成キャスト
+- これらは手動で`auto_generation_settings`を設定するか、`auto_approve`が0または1のままだった
+
+**修正後の動作**:
+- 今後CSVインポート経由で作成される新規キャストは、自動的に完全自動化設定が適用される
+- 追加設定なしで自動投稿生成→承認→予約が動作する
+
+### **既存キャストへの対応**
+
+**sabotenheart（cast_id=95）への対応**:
+```sql
+-- クイックフィックス適用済み（2025-11-16）
+UPDATE auto_generation_settings SET auto_approve = 2 WHERE cast_id = 95;
+```
+
+**他の既存キャスト**:
+- 必要に応じてGUIの「🤖 自動生成設定」タブから個別に設定変更可能
+- 一括更新が必要な場合は以下のSQLで対応:
+```sql
+UPDATE auto_generation_settings SET auto_approve = 2 WHERE auto_approve < 2;
+```
+
+### **テスト手順**
+
+1. **新規キャスト作成**:
+   - CSVファイルで新規キャスト情報を作成
+   - 「📥 CSV管理」タブからインポート
+
+2. **設定確認**:
+   ```sql
+   SELECT cast_id, enabled, auto_approve, posts_per_day 
+   FROM auto_generation_settings 
+   WHERE cast_id = [新規作成したキャストID];
+   ```
+   - 期待値: `[cast_id]|1|2|3`
+
+3. **動作確認**:
+   - 翌日の自動生成バッチ実行後、投稿が`approved`かつ`sent_status='scheduled'`になっていることを確認
+
+### **デプロイ情報**
+
+- **コミットID**: `c3c0eee7`
+- **デプロイ日時**: 2025年11月16日 12:10（JST）
+- **ブランチ**: `clean-production`
+- **VPS再起動**: 完了
+
+### **運用上の注意点**
+
+1. **既存キャストの設定は変更されない**:
+   - この修正は新規作成時のみ適用される
+   - 既存キャストの設定変更は手動またはSQL実行が必要
+
+2. **CSV以外の作成方法**:
+   - 現在のUIには新規キャスト作成フォームが存在しない（CSV経由のみ）
+   - 将来的にGUIフォームを追加する場合、同様の初期化処理が必要
+
+3. **デフォルト値の妥当性**:
+   - `posts_per_day=3`は控えめな設定
+   - 必要に応じてGUIから変更可能
+
+### **改善効果**
+
+**✅ メリット**:
+- 新規キャスト追加時の設定作業が不要に
+- ヒューマンエラー（設定忘れ）の防止
+- 即座に完全自動化された投稿運用が開始可能
+
+**📊 影響**:
+- オペレーション時間: 5分/キャスト → 0分/キャスト
+- 設定ミスリスク: 低減
+
+---
 
 **🚀 次のステップ:**
 Phase 2として、データ駆動の品質改善と外部API連携を予定。
