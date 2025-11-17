@@ -5593,9 +5593,11 @@ def main():
                     st.subheader(f"編集中: {cast_data['name']}（{cast_data['nickname']}）")
                 with col_delete_top:
                     if st.button("🗑️ このキャストを削除", type="secondary", key=f"delete_cast_top_{selected_cast_id}", use_container_width=True):
+                        import logging
+                        logging.info(f"[DELETE] Button clicked for cast_id={selected_cast_id}, confirm_state={st.session_state.get(f'confirm_delete_{selected_cast_id}')}")
+                        
                         if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
                             try:
-                                import logging
                                 logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data['name']}")
                                 
                                 # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
@@ -5620,10 +5622,10 @@ def main():
                                     del st.session_state[f'confirm_delete_{selected_cast_id}']
                                 st.rerun()
                             except Exception as e:
-                                import logging
                                 logging.error(f"[DELETE] Error deleting cast_id={selected_cast_id}: {e}")
                                 st.error(f"❌ 削除エラー: {e}")
                         else:
+                            logging.info(f"[DELETE] First click - setting confirm flag for cast_id={selected_cast_id}")
                             st.session_state[f'confirm_delete_{selected_cast_id}'] = True
                             st.warning("⚠️ もう一度クリックすると削除されます")
                             st.rerun()
