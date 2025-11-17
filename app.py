@@ -5595,6 +5595,9 @@ def main():
                     if st.button("🗑️ このキャストを削除", type="secondary", key=f"delete_cast_top_{selected_cast_id}", use_container_width=True):
                         if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
                             try:
+                                import logging
+                                logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data.get('name')}")
+                                
                                 # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
                                 execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
                                 execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
@@ -5608,7 +5611,8 @@ def main():
                                 execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
                                 
                                 # 最後にキャスト本体を削除
-                                execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
+                                result = execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
+                                logging.info(f"[DELETE] Deletion completed for cast_id={selected_cast_id}, result={result}")
                                 
                                 st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
                                 st.session_state.selected_cast_for_edit = None
@@ -5616,6 +5620,8 @@ def main():
                                     del st.session_state[f'confirm_delete_{selected_cast_id}']
                                 st.rerun()
                             except Exception as e:
+                                import logging
+                                logging.error(f"[DELETE] Error deleting cast_id={selected_cast_id}: {e}")
                                 st.error(f"❌ 削除エラー: {e}")
                         else:
                             st.session_state[f'confirm_delete_{selected_cast_id}'] = True
