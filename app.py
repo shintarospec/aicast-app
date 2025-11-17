@@ -6267,7 +6267,21 @@ def main():
                     
                     if col_delete.button("🗑️ 削除", type="secondary", key=f"delete_{selected_cast_id}"):
                         try:
+                            # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
+                            execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM cast_x_credentials WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM account_mission WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM cast_action_sheets WHERE cast_id = ?", (selected_cast_id,))
+                            execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
+                            
+                            # 最後にキャスト本体を削除
                             execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
+                            
                             st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
                             st.session_state.selected_cast_for_edit = None
                             st.rerun()
