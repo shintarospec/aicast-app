@@ -4212,10 +4212,18 @@ def main():
                             columns = ', '.join(cast_data.keys()); placeholders = ', '.join(['?'] * len(cast_data)); values = tuple(cast_data.values())
                             new_cast_id = execute_query(f"INSERT INTO casts ({columns}) VALUES ({placeholders})", values)
                             if new_cast_id:
+                                # グループ登録
                                 for group_name in new_groups:
                                     group_id = group_options.get(group_name)
                                     execute_query("INSERT INTO cast_groups (cast_id, group_id) VALUES (?, ?)", (new_cast_id, group_id))
-                                st.session_state.cast_import_message = ("success", f"新しいキャスト「{new_name}」を作成しました！")
+                                
+                                # 自動生成設定を初期化（デフォルト: enabled=1, auto_approve=2, posts_per_day=3）
+                                execute_query(
+                                    "INSERT INTO auto_generation_settings (cast_id, enabled, auto_approve, posts_per_day) VALUES (?, ?, ?, ?)",
+                                    (new_cast_id, 1, 2, 3)
+                                )
+                                
+                                st.session_state.cast_import_message = ("success", f"新しいキャスト「{new_name}」を作成しました！（自動生成: 有効・完全自動・1日3件）")
                                 st.rerun()
                         else: st.error("キャスト名は必須項目です。")
 

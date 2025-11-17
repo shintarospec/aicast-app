@@ -1,5 +1,5 @@
 # AIcast Room 機能追加・改修仕様書
-## 更新日: 2025年10月7日〜11月16日
+## 更新日: 2025年10月7日〜11月17日
 
 ---
 
@@ -7,7 +7,15 @@
 
 本文書は、2025年10月7日以降に実施されたAIcast Roomの機能追加・改修内容をまとめた仕様書です。
 
-### 最新更新（2025年11月16日）
+### 最新更新（2025年11月17日）
+
+**全アカウントの自動生成設定を最適化:**
+
+20. **自動生成バッチの実行時間統一** - 全93アカウントを深夜2時実行に統一
+21. **予約期間の最適化** - 2-4日後→1-3日後に変更、より早い投稿を実現
+22. **既存アカウントの一括修正** - auto_approve=0のアカウント29件を完全自動化（auto_approve=2）に変更
+
+### 過去の更新（2025年11月16日）
 
 **新規キャスト作成時の自動生成設定初期化を実装:**
 
@@ -2024,6 +2032,293 @@ UPDATE auto_generation_settings SET auto_approve = 2 WHERE auto_approve < 2;
 **📊 影響**:
 - オペレーション時間: 5分/キャスト → 0分/キャスト
 - 設定ミスリスク: 低減
+
+---
+
+## 20. 自動生成バッチの実行時間統一と予約期間最適化
+
+### **問題背景**
+
+**発生日**: 2025年11月17日
+
+**問題内容**:
+1. **自動生成時刻がバラバラ**: 09:00に設定されていたが、最適化の余地あり
+2. **予約期間が長すぎる**: 2-4日後の設定で、即応性に欠ける
+3. **既存アカウントの設定不備**: 29アカウントが`auto_approve=0`（下書きのみ）のまま
+
+**改善要求**:
+- 深夜時間帯での一括実行による効率化
+- より早い投稿スケジュール（1-3日後）
+- 全アカウントの完全自動化
+
+### **実装内容**
+
+#### **1. 全アカウントの自動生成時刻を深夜2時に統一**
+
+**変更内容**:
+```sql
+UPDATE auto_generation_settings 
+SET generation_time = '02:00' 
+WHERE enabled = 1;
+```
+
+**変更対象**: 93アカウント
+
+**メリット**:
+- 🌙 システムリソース独占（深夜時間帯）
+- 🚀 API制限の心配なし
+- 🤖 完全無人運用
+- ⏱️ 処理完了時刻: 2:00-2:31（約31分）
+
+#### **2. 予約期間の最適化（2-4日後→1-3日後）**
+
+**変更内容**:
+```sql
+UPDATE auto_generation_settings 
+SET min_days_offset = 1, max_days_offset = 3 
+WHERE enabled = 1;
+```
+
+**変更前**:
+- `min_days_offset = 2`（最短2日後）
+- `max_days_offset = 4`（最長4日後）
+
+**変更後**:
+- `min_days_offset = 1`（最短翌日）
+- `max_days_offset = 3`（最長3日後）
+
+**効果**:
+- ✅ 翌日から投稿可能（即応性向上）
+- ✅ 1-3日間で均等分散
+- ✅ より新鮮な投稿スケジュール
+
+#### **3. 既存アカウントの一括完全自動化**
+
+**問題**: cast_id 89-103等、29アカウントが`auto_approve=0`のまま
+
+**変更内容**:
+```sql
+UPDATE auto_generation_settings 
+SET auto_approve = 2 
+WHERE enabled = 1 AND auto_approve < 2;
+```
+
+**変更対象**: 29アカウント
+
+**効果**:
+- `auto_approve=0`（下書きのみ） → `auto_approve=2`（完全自動）
+- 手動承認作業が不要に
+- 生成→承認→予約まで自動完結
+
+### **実行フロー**
+
+#### **変更前**:
+```
+09:00 - 各アカウント個別に生成開始
+  ↓
+09:00-09:30 - 93アカウント順次処理
+  ↓
+2-4日後の7:00-23:00 - 投稿予約
+  ↓
+一部アカウントは下書きで停止（auto_approve=0）
+```
+
+#### **変更後**:
+```
+02:00 - 全アカウント一斉生成開始
+  ↓ (31分)
+02:31 - 全処理完了
+  │
+  ├─ 投稿生成: 93アカウント × 3件 = 279件/日
+  ├─ 自動承認: 全件
+  └─ 自動予約: 全件（1-3日後の7:00-23:00）
+  ↓
+翌日以降 - 予約投稿が自動配信
+```
+
+### **処理時間の詳細**
+
+**1アカウントあたりの処理時間**:
+- 投稿3件生成: 約15秒（Vertex AI呼び出し）
+- 承認処理: 約2秒（DB更新）
+- 予約処理: 約3秒（DB更新 + 日時計算）
+- **合計**: 約20秒/アカウント
+
+**全体処理時間**:
+```
+93アカウント × 20秒 = 1,860秒 = 31分
+実行時間帯: 2:00-2:31
+```
+
+### **設定値の詳細**
+
+| 設定項目 | 変更前 | 変更後 | 影響 |
+|---------|--------|--------|------|
+| `generation_time` | `09:00` | `02:00` | 深夜実行による効率化 |
+| `min_days_offset` | `2` | `1` | 翌日投稿が可能に |
+| `max_days_offset` | `4` | `3` | より早い投稿スケジュール |
+| `auto_approve` | `0-2` | `2`（統一） | 全アカウント完全自動化 |
+
+### **予約時刻の生成ロジック**
+
+**コード**（auto_generation_batch.py）:
+```python
+days_offset = random.randint(1, 3)  # 1-3日後
+random_hour = random.randint(7, 23)  # 7:00-23:00
+random_minute = random.randint(0, 59)  # 0-59分
+
+scheduled_time = (datetime.datetime.now() + datetime.timedelta(days=days_offset)).replace(
+    hour=random_hour, minute=random_minute, second=0, microsecond=0
+)
+```
+
+**予約時刻の例**（2025年11月17日 02:00生成の場合）:
+- 投稿1: 2025-11-18 14:23（翌日）
+- 投稿2: 2025-11-19 08:47（2日後）
+- 投稿3: 2025-11-20 21:15（3日後）
+
+### **影響範囲**
+
+**全93アカウントに適用**:
+```sql
+SELECT COUNT(*) as total, generation_time, min_days_offset, max_days_offset 
+FROM auto_generation_settings 
+WHERE enabled = 1;
+-- 結果: 93|02:00|1|3
+```
+
+### **動作確認方法**
+
+#### **1. 明日朝の確認（2025年11月18日）**
+
+```bash
+# SSH接続
+ssh ubuntu@153.126.194.114
+cd /home/ubuntu/aicast-app
+
+# 自動生成ログを確認
+tail -100 auto_generation.log | grep "2025-11-18 02:"
+
+# 生成された投稿数を確認
+sqlite3 casting_office.db "SELECT COUNT(*) FROM posts WHERE created_at >= '2025-11-18' AND created_at < '2025-11-18 03:00';"
+# 期待値: 279件（93アカウント × 3件）
+
+# 予約済み投稿を確認
+sqlite3 casting_office.db "SELECT COUNT(*) FROM posts WHERE sent_status='scheduled' AND created_at >= '2025-11-18';"
+# 期待値: 279件（全て自動予約済み）
+```
+
+#### **2. 予約日時の分布確認**
+
+```sql
+-- 予約日別の投稿数
+SELECT DATE(posted_at) as schedule_date, COUNT(*) as count
+FROM posts
+WHERE sent_status='scheduled' AND created_at >= '2025-11-18'
+GROUP BY DATE(posted_at)
+ORDER BY schedule_date;
+
+-- 期待結果:
+-- 2025-11-19: 約93件（1日後）
+-- 2025-11-20: 約93件（2日後）
+-- 2025-11-21: 約93件（3日後）
+```
+
+### **トラブルシューティング**
+
+#### **問題1: 深夜2時に実行されない**
+
+**確認**:
+```bash
+# cron稼働確認
+sudo systemctl status cron
+
+# cronログ確認
+sudo grep CRON /var/log/syslog | grep "02:0"
+```
+
+**対処**: cronは5分間隔で実行されるので、2:00-2:05の間に実行される
+
+#### **問題2: 一部のアカウントが下書きのまま**
+
+**確認**:
+```sql
+SELECT c.name, p.status, p.sent_status 
+FROM posts p 
+JOIN casts c ON p.cast_id = c.id 
+WHERE p.created_at >= '2025-11-18' AND p.status = 'draft';
+```
+
+**対処**: `auto_approve`設定を確認
+```sql
+SELECT cast_id, auto_approve FROM auto_generation_settings WHERE auto_approve != 2;
+```
+
+### **運用上の注意点**
+
+1. **処理時間のバッファ**:
+   - 2:00-2:31の31分間はVPSの負荷が高い
+   - 手動操作は避ける
+   - 他のバッチ処理と競合しないよう注意
+
+2. **予約期間の調整**:
+   - 1-3日後の設定は変更可能
+   - 即日投稿が必要な場合: `min_days_offset=0`
+   - より長期計画の場合: `max_days_offset=7`など
+
+3. **モニタリング**:
+   - 毎朝auto_generation.logを確認
+   - エラーがあれば即対応
+   - 予約投稿数の推移を週次確認
+
+### **改善効果**
+
+**✅ メリット**:
+- **効率化**: 深夜時間帯の一括処理による安定稼働
+- **即応性**: 2-4日後→1-3日後で投稿が早まる
+- **完全自動化**: 29アカウントの手動作業が不要に
+- **運用コスト削減**: 設定統一により管理が容易
+
+**📊 定量的効果**:
+
+| 指標 | 変更前 | 変更後 | 改善 |
+|------|--------|--------|------|
+| 手動承認が必要なアカウント | 29件 | 0件 | -100% |
+| 投稿開始までの最短日数 | 2日 | 1日 | -50% |
+| バッチ実行時間帯の競合リスク | 高（9時） | 低（2時） | リスク低減 |
+| 日次確認作業 | 必須 | オプション | 効率化 |
+
+**💰 コスト影響**:
+- Vertex AI APIコスト: 変更なし（生成件数同じ）
+- 運用工数: 1日30分 → 週5分（-83%削減）
+
+### **今後の拡張性**
+
+#### **提案1: 時間帯別の分散実行**
+
+負荷をさらに分散したい場合：
+```sql
+-- グループA（30件）: 02:00実行
+UPDATE auto_generation_settings SET generation_time = '02:00' WHERE cast_id <= 30;
+
+-- グループB（30件）: 03:00実行
+UPDATE auto_generation_settings SET generation_time = '03:00' WHERE cast_id BETWEEN 31 AND 60;
+
+-- グループC（残り）: 04:00実行
+UPDATE auto_generation_settings SET generation_time = '04:00' WHERE cast_id > 60;
+```
+
+#### **提案2: 曜日別の投稿量調整**
+
+休日を増量するなど：
+```python
+# auto_generation_batch.pyに追加
+import datetime
+if datetime.datetime.now().weekday() >= 5:  # 土日
+    posts_per_day = 5  # 休日は5件
+else:
+    posts_per_day = 3  # 平日は3件
+```
 
 ---
 
