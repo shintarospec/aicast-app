@@ -5596,7 +5596,7 @@ def main():
                         if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
                             try:
                                 import logging
-                                logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data.get('name')}")
+                                logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data['name']}")
                                 
                                 # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
                                 execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
