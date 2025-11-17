@@ -5587,6 +5587,45 @@ def main():
                     st.error("選択されたキャストが見つかりません")
                     st.stop()
                 
+                # キャスト情報のヘッダー表示と削除ボタン
+                col_header, col_delete_top = st.columns([4, 1])
+                with col_header:
+                    st.subheader(f"編集中: {cast_data['name']}（{cast_data['nickname']}）")
+                with col_delete_top:
+                    if st.button("🗑️ このキャストを削除", type="secondary", key=f"delete_cast_top_{selected_cast_id}", use_container_width=True):
+                        if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
+                            try:
+                                # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
+                                execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_x_credentials WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM account_mission WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_action_sheets WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
+                                
+                                # 最後にキャスト本体を削除
+                                execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
+                                
+                                st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
+                                st.session_state.selected_cast_for_edit = None
+                                if f'confirm_delete_{selected_cast_id}' in st.session_state:
+                                    del st.session_state[f'confirm_delete_{selected_cast_id}']
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ 削除エラー: {e}")
+                        else:
+                            st.session_state[f'confirm_delete_{selected_cast_id}'] = True
+                            st.warning("⚠️ もう一度クリックすると削除されます")
+                            st.rerun()
+                
+                # 確認状態の表示
+                if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
+                    st.error(f"⚠️ 本当に削除しますか？ もう一度「🗑️ このキャストを削除」ボタンをクリックすると完全に削除されます")
+                
                 persona_data = execute_query("SELECT * FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,), fetch="one")
                 mission_data = execute_query("SELECT * FROM account_mission WHERE cast_id = ?", (selected_cast_id,), fetch="one")
                 profile_data = execute_query("SELECT * FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,), fetch="one")
@@ -6264,29 +6303,6 @@ def main():
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ 保存エラー: {e}")
-                    
-                    if col_delete.button("🗑️ 削除", type="secondary", key=f"delete_{selected_cast_id}"):
-                        try:
-                            # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
-                            execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM cast_x_credentials WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM account_mission WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM cast_action_sheets WHERE cast_id = ?", (selected_cast_id,))
-                            execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
-                            
-                            # 最後にキャスト本体を削除
-                            execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
-                            
-                            st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
-                            st.session_state.selected_cast_for_edit = None
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 削除エラー: {e}")
         
         # ==================== タブ2: キャスト一覧 ====================
         with tab_list:
