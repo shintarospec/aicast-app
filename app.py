@@ -359,6 +359,11 @@ def execute_query(query, params=(), fetch=None):
     """データベース接続、クエリ実行、接続切断を安全に行う"""
     conn = None
     try:
+        import logging
+        # DELETEクエリのログ出力
+        if query.strip().upper().startswith('DELETE'):
+            logging.info(f"[SQL] Executing: {query[:100]} with params: {params}")
+        
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -372,6 +377,9 @@ def execute_query(query, params=(), fetch=None):
         else:
             conn.commit()
             result = cursor.lastrowid if cursor.lastrowid else None
+            # DELETEクエリのコミット確認
+            if query.strip().upper().startswith('DELETE'):
+                logging.info(f"[SQL] DELETE committed, rowcount: {cursor.rowcount}")
         return result
     except sqlite3.Error as e:
         # Streamlitが使用可能な場合のみst.error()を呼び出す
@@ -5587,52 +5595,12 @@ def main():
                     st.error("選択されたキャストが見つかりません")
                     st.stop()
                 
-                # キャスト情報のヘッダー表示と削除ボタン
-                col_header, col_delete_top = st.columns([4, 1])
-                with col_header:
-                    st.subheader(f"編集中: {cast_data['name']}（{cast_data['nickname']}）")
-                with col_delete_top:
-                    if st.button("🗑️ このキャストを削除", type="secondary", key=f"delete_cast_top_{selected_cast_id}", use_container_width=True):
-                        import logging
-                        logging.info(f"[DELETE] Button clicked for cast_id={selected_cast_id}, confirm_state={st.session_state.get(f'confirm_delete_{selected_cast_id}')}")
-                        
-                        if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
-                            try:
-                                logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data['name']}")
-                                
-                                # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
-                                execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM cast_x_credentials WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM account_mission WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM cast_action_sheets WHERE cast_id = ?", (selected_cast_id,))
-                                execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
-                                
-                                # 最後にキャスト本体を削除
-                                result = execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
-                                logging.info(f"[DELETE] Deletion completed for cast_id={selected_cast_id}, result={result}")
-                                
-                                st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
-                                st.session_state.selected_cast_for_edit = None
-                                if f'confirm_delete_{selected_cast_id}' in st.session_state:
-                                    del st.session_state[f'confirm_delete_{selected_cast_id}']
-                                st.rerun()
-                            except Exception as e:
-                                logging.error(f"[DELETE] Error deleting cast_id={selected_cast_id}: {e}")
-                                st.error(f"❌ 削除エラー: {e}")
-                        else:
-                            logging.info(f"[DELETE] First click - setting confirm flag for cast_id={selected_cast_id}")
-                            st.session_state[f'confirm_delete_{selected_cast_id}'] = True
-                            st.warning("⚠️ もう一度クリックすると削除されます")
-                            st.rerun()
+                # キャスト情報のヘッダー表示
+                st.subheader(f"編集中: {cast_data['name']}（{cast_data['nickname']}）")
                 
                 # 確認状態の表示
                 if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
-                    st.error(f"⚠️ 本当に削除しますか？ もう一度「🗑️ このキャストを削除」ボタンをクリックすると完全に削除されます")
+                    st.error(f"⚠️ 本当に削除しますか？ ページ下部の「🗑️ このキャストを削除」ボタンをもう一度クリックすると完全に削除されます")
                 
                 persona_data = execute_query("SELECT * FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,), fetch="one")
                 mission_data = execute_query("SELECT * FROM account_mission WHERE cast_id = ?", (selected_cast_id,), fetch="one")
@@ -6311,6 +6279,45 @@ def main():
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ 保存エラー: {e}")
+                    
+                    # 削除ボタン
+                    if col_delete.button("🗑️ このキャストを削除", type="secondary", key=f"delete_cast_bottom_{selected_cast_id}"):
+                        import logging
+                        logging.info(f"[DELETE] Button clicked for cast_id={selected_cast_id}, confirm_state={st.session_state.get(f'confirm_delete_{selected_cast_id}')}")
+                        
+                        if st.session_state.get(f'confirm_delete_{selected_cast_id}'):
+                            try:
+                                logging.info(f"[DELETE] Starting deletion for cast_id={selected_cast_id}, name={cast_data['name']}")
+                                
+                                # 関連テーブルのデータを先に削除（外部キー制約が無効のため手動削除）
+                                execute_query("DELETE FROM posts WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM auto_generation_settings WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_groups WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_x_credentials WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM persona_detailed WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM sample_posts WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM sample_profiles WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM account_mission WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_action_sheets WHERE cast_id = ?", (selected_cast_id,))
+                                execute_query("DELETE FROM cast_sheets_config WHERE cast_id = ?", (selected_cast_id,))
+                                
+                                # 最後にキャスト本体を削除
+                                result = execute_query("DELETE FROM casts WHERE id = ?", (selected_cast_id,))
+                                logging.info(f"[DELETE] Deletion completed for cast_id={selected_cast_id}, result={result}")
+                                
+                                st.session_state.cast_import_message = ("success", f"🗑️ キャスト「{cast_data['name']}」を削除しました")
+                                st.session_state.selected_cast_for_edit = None
+                                if f'confirm_delete_{selected_cast_id}' in st.session_state:
+                                    del st.session_state[f'confirm_delete_{selected_cast_id}']
+                                st.rerun()
+                            except Exception as e:
+                                logging.error(f"[DELETE] Error deleting cast_id={selected_cast_id}: {e}")
+                                st.error(f"❌ 削除エラー: {e}")
+                        else:
+                            logging.info(f"[DELETE] First click - setting confirm flag for cast_id={selected_cast_id}")
+                            st.session_state[f'confirm_delete_{selected_cast_id}'] = True
+                            st.warning("⚠️ もう一度クリックすると削除されます")
+                            st.rerun()
         
         # ==================== タブ2: キャスト一覧 ====================
         with tab_list:
