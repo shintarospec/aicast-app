@@ -12,6 +12,8 @@ app.log
 # 一時ファイル
 .DS_Store
 Thumbs.db
+*.lock
+.auto_generation.lock
 
 # Python関連
 *.pyc

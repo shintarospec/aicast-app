@@ -1,0 +1,49 @@
+{
+  "name": "AIcast Room Development",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "files.autoSave": "afterDelay",
+        "files.autoSaveDelay": 1000
+      }
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": {
+      "label": "Streamlit App",
+      "onAutoForward": "notify"
+    }
+  },
+
+  "remoteEnv": {
+    "GCP_PROJECT": "${localEnv:GCP_PROJECT}"
+  },
+
+  "mounts": [
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/vscode/.config/gcloud,type=bind,consistency=cached"
+  ]
+}
